@@ -1,0 +1,28 @@
+# Geyser Cycler Tool - Example config
+# Copy to config.yaml and adjust paths/keys as needed.
+
+paths:
+  cells_root: D:\Electrical_tests\Cells
+  blocks_root: D:\Electrical_tests\Blocks
+  staging_root: D:\Electrical_tests\_staging
+
+bq:
+  project: geyser-testing
+
+gcs:
+  # If set, parquet is uploaded to GCS and BigQuery loads from GCS (memory-efficient)
+  gcs_bucket: ""
+  gcs_staging_prefix: staging/
+  dataset: electrical_tests
+  # Path to service account JSON key (optional; uses Application Default Credentials if omitted)
+  service_account_key: null  # e.g. path/to/geyser-testing-key.json
+
+esr:
+  delays_s: [0.010, 1.0]
+  strict_mode: true
+  tolerance_s: 0.0
+
+curves:
+  max_points_per_run: 50000   # No longer used for time_series
+  points_per_cycle_cycling: 150
+  points_per_cycle_cv: 1500

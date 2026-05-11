@@ -1,0 +1,37 @@
+# Protocol registry: patterns for matching program headers to protocol labels.
+# Each protocol has keywords that must appear in the program step modes (case-insensitive).
+# First matching protocol wins; order matters.
+
+protocols:
+  - label: STANDARD_CELL
+    description: "SOP 3C - CCC, SNU, DCC, cycling"
+    keywords_any:
+      - "Rest"
+      - "Logger U"
+    keywords_all:
+      - "Scanning U"
+      - "Charge CC"
+      - "Discharge CC"
+      - "Charge CV"
+    confidence: 0.7
+
+  - label: BLOCK_SCANNING
+    description: "SOP 3C - Only scanning, SNU"
+    keywords_all:
+      - "Scanning U"
+      - "Preset number of cycles"
+    confidence: 0.7
+
+  - label: BLOCK_CYCLING
+    description: "SOP 3C - Only cycling "
+    keywords_all:
+      - "Discarge CC"
+      - "Rest"
+      - "Preset number of cycles"
+    confidence: 0.7
+
+  # CYCLABILITY (SOP 5C long cyclability) is detected in detector.py:
+  # cells need "Cycle to step ... <n> times" with n > 20 and "Discharge CC";
+  # blocks need "Preset number of cycles: N" with N > 20 and "Discarge CC".
+
+  # UNKNOWN is implicit when no pattern matches

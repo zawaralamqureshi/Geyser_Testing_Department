@@ -1,0 +1,52 @@
+# --- Secrets & local config (do not commit) ---
+Tool/config.yaml
+# Service account keys and other secrets often land here as *.json
+Tool/**/*.json
+
+*.pem
+
+# Env files with credentials
+.env
+.env.*
+!.env.example
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.so
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+pip-wheel-metadata/
+.venv/
+venv/
+ENV/
+
+# Packaging / tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.cover
+
+# Jupyter
+.ipynb_checkpoints/
+
+# --- OS ---
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# --- Editor (optional local junk) ---
+*.swp
+*~
+~$*
+*.log
+
+# --- Local staging batches (Parquet uploads under repo tree) ---
+**/batch_*/
