@@ -24,7 +24,7 @@ todos:
     content: "Phase 1: Basic Looker Studio dashboards (ESR trends, capacity/energy per batch, efficiency)"
     status: completed
   - id: phase1-tests
-    content: "Phase 1: Unit tests for header parser, CLK reader, protocol detector, ID parser"
+    content: "Deferred: Unit tests — optional golden RAW fixtures later"
     status: pending
   - id: phase2-raw
     content: "Phase 2: RAW file reader + ESR recomputation (10ms/1s, strict + tolerant modes)"
@@ -33,7 +33,7 @@ todos:
     content: "Phase 2: Curve generation (CV/SNU, Cycling V-t+I, dQ/dV) + curves BigQuery table + Looker viewer"
     status: completed
   - id: phase3-ocv
-    content: "Phase 3: DCIR extraction, advanced Looker dashboards, data-quality reports, protocol explorer, PyInstaller EXE"
+    content: "Deferred: DCIR, advanced KPI Looker dashboards, protocol explorer UI, PyInstaller EXE — out of scope; see §11 changelog (RAW ETL + curves)"
     status: pending
   - id: phase3-incremental-upload
     content: "Phase 3: Per-table fingerprint - smart skip when fingerprints match; --force override"
@@ -45,10 +45,10 @@ todos:
     content: "Phase 3: Split stage and upload flow - Stage to Parquet only, then Upload batch to GCS/BigQuery"
     status: completed
   - id: phase3-dynamic-max-points
-    content: "Phase 3: Dynamic max_points_per_run - derive from Data recording period in header; avoid downsampling for 100 Hz / 10 Hz tests"
+    content: "Optional: tighten time_series row policy if warehouse cost dominates (full fidelity kept by default)"
     status: pending
   - id: docs-sync
-    content: Keep Tool/README.md, docs/LOOKER_SETUP.md, and this plan in sync when behaviour changes (cf. § Living document)
+    content: "Maintain README / LOOKER_SETUP / plan changelog when altering RAW or curves behaviour"
     status: pending
 isProject: false
 ---
@@ -610,6 +610,13 @@ tags_override_heuristics: true
 ---
 
 ## 11. Implementation Changelog
+
+### RAW ETL fidelity and Looker-aligned curves — 2026-05 (active focus)
+
+- **`raw_ts.inter_cycle_gap_s`:** Synthetic gap between concatenated RAW cycle files on **`time_series.time_s`**; **default `0`** ([`config.py`](Tool/geyser_tool/config.py), [`build_time_series_rows`](Tool/geyser_tool/upload/bigquery.py)). Set a positive value (e.g. `0.01`) only if you want an explicit delimiter.
+- **RAW documentation:** [`raw_reader`](Tool/geyser_tool/parsers/raw_reader.py) module docs describe **`Time,s`**, **`Step`** segmentation, **`time_continuous_s`**, and relationship to per-step durations.
+- **`curves`:** Default **per `(cycle_no, step_no)`** downsampling with edge preservation; CV caps tighten when CLK **`sample_rate_hz`** is low — see [`curves.py`](Tool/geyser_tool/analysis/curves.py) and [`LOOKER_SETUP.md`](Tool/docs/LOOKER_SETUP.md).
+- **Backlog triage:** Automated **pytest**, **PyInstaller EXE**, protocol **explorer** UI, **DCIR** extractor, and legacy SOP-specific protocol rows (**Reference GCD**, **FCR-D**, etc.) are **out of current scope** unless re-prioritized. Primary roadmap: **RAW ingestion accuracy + dashboard-friendly `curves` + Looker documentation.**
 
 ### Protocol labels & CYCLABILITY gating — 2026-05
 

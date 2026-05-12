@@ -15,26 +15,36 @@ Connect Looker Studio to your BigQuery dataset to build dashboards for electrica
 | `test_runs` | One row per CLK file: run_id, index_id, object_id, protocol, date_ymd, group_id, test_date |
 | `cycle_metrics` | Per-cycle metrics (GNRL): capacity, energy, ESR, efficiencies |
 | `step_metrics` | Per-step metrics: step_no, step_type, duration, voltage, current |
-| `time_series` | Time-series (all RAW data, no downsampling): time_s, voltage_v, current_a, temperature_c, capacity_ah, energy_wh |
-| `curves` | Downsampled curves (time-based): x=time_s, y=voltage_v, y2=current_a per point |
-| `esr_computed` | Recomputed ESR at 10ms and 1s from RAW |
+| `time_series` | Time-series (**all** RAW samples stored; no downsampling): `time_s`, `step_no`, `step_type`, voltage, current, temperature, Ah, Wh |
+| `curves` | **Downsampled** points for dashboards: see below (CYCLING vs CV semantics) |
+| `esr_computed` | Recomputed ESR at 10ms and 1s from **full** RAW (not from `curves`) |
 
-### Curves table columns (time-based)
-| Column | Meaning |
-|--------|---------|
-| **x** | Time in seconds (global for full program; same as time_s) |
-| **y** | Voltage (V) |
-| **y2** | Current (A) |
-| **seq** | Row index for ordering only; do not use for axes |
+### Curves table semantics (for charts)
+
+| curve_type | Typical x | y | y2 | Notes |
+|------------|-----------|---|---|--------|
+| CYCLING | Global time `time_s` (seconds) | voltage V | current A | Charge/Discharge/RLAX steps; excludes SNU scan steps |
+| CV | Voltage V | current A | _(null)_ | SNU / scan steps only |
+
+**seq** is a single global sort key for the concatenated curve dataset (CYCLING rows first, then CV in the current builder). Use **dimensions** `run_id`, `cycle_no`, `step_no`, `curve_type`, and **seq** as a secondary sort in Looker.
 
 ### Where downsampling occurs
-| Table | Limit |
-|-------|-------|
-| `time_series` | None (all RAW data stored) |
-| `curves` (CYCLING) | 150 points per cycle |
-| `curves` (CV) | 1,500 points per cycle |
 
-No downsampling: `test_runs`, `cycle_metrics`, `step_metrics`, `esr_computed`.
+| Table | Policy |
+|-------|--------|
+| `time_series` | **None** — every RAW row is stored (full fidelity / ESR accuracy). |
+| `curves` (CYCLING) | Defaults to **per `(cycle_no, step_no)` segment — up to `max_points_per_cycling_segment`** (first and last sample in each segment preserved when k>1). Older **per-cycle-only** mode still available via `curves_per_step_segment: false`. |
+| `curves` (CV) | **Per `(cycle_no, step_no)`** up to `max_points_per_cv_segment`; if `sample_rate_hz` from CLK ≤ `min_points_per_cv_segment_if_low_rate_hz`, uses `max_points_per_cv_segment_low_rate` instead (fewer points on 10 Hz traces). |
+
+Tune all of the above under `curves:` / `raw_ts:` in `config.yaml`. See `Tool/config.example.yaml`.
+
+### Looker Studio point limits
+
+Looker line and scatter charts commonly **truncate or slow** when plotting **thousands of marks** (rules change by chart type; teams often target **≈5 000** marks for scatter and **≈10 000** as an upper bound for line charts). Prefer the **`curves`** table for overview plots; drill into **`time_series`** with **strong filters** (`run_id`, narrow `time_s` slice, or **`ROW_NUMBER()`** SQL cap) if you need finer resolution in a custom query.
+
+### No downsampling
+
+`test_runs`, `cycle_metrics`, `step_metrics`, `esr_computed` aggregate or tabular — not point streams.
 
 ## 3. Suggested Dashboards
 

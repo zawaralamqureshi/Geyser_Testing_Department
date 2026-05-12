@@ -18,7 +18,7 @@ This README is the **primary user-facing** description of the tool. The engineer
 
 5. **CLK metrics** — Tabular **`GNRL`** (per-cycle) and per-step metrics are parsed from the CLK (`geyser_tool/parsers/clk_reader.py`) for **`cycle_metrics`**, **`step_metrics`**. Charge/discharge capacity and energy are aggregated where applicable.
 
-6. **RAW (optional)** — Unless **`--no-raw`** / GUI equivalent, sibling RAW traces are discovered (layout differs slightly between cell and block folder conventions), concatenated along time where needed, downsampling applied per config, written to **`time_series`**. ESR and curve derivation from RAW populate **`esr_computed`** and **`curves`** when applicable.
+6. **RAW (optional)** — Unless **`--no-raw`** / GUI equivalent, sibling RAW files are discovered, parsed into **`time_series`** (**all** samples — no downsampling). **`curves`** holds **downsampled** points for Looker-friendly charts; **`esr_computed`** uses the full per-file RAW trajectory. See **[RAW time axis and BigQuery `time_s`](#raw-time-axis-and-bigquery-ts)**.
 
 7. **Fingerprints** — Before heavy work, per-table fingerprints (from file paths, sizes, mtimes—not full content) are compared with **`run_fingerprints`** in BigQuery. **Matched** fingerprints **skip** reprocessing unless **`--force`** or **`--force-run RUN_ID`**.
 
@@ -50,7 +50,13 @@ Mirrors the CLI ideas: browse a folder to list CLK headers, optionally **stage**
 |----------|---------|
 | [docs/LOOKER_SETUP.md](docs/LOOKER_SETUP.md) | Dimensions, charts, **`protocol_detected`** filters |
 | [.cursor/plans/geyser_cycler_analysis_tool_8562c610.plan.md](../.cursor/plans/geyser_cycler_analysis_tool_8562c610.plan.md) | Phased plan, changelog, backlog |
-| `config.example.yaml` | GCP and staging knobs |
+| `config.example.yaml` | GCP, staging, RAW stitch, and curve sampling knobs |
+
+## RAW time axis and BigQuery `time_s`
+
+- **Within one RAW file:** The analyzer logs **`Time,s`** from **0** at each **new `Step`** row (e.g. `6DCCC`, `7RLAX`). The reader builds **`time_continuous_s`** by detecting **contiguous runs of identical `Step`** and advancing an offset by **`max(Time,s)`** in each run — so per-step **durations match the RAW table** (e.g. 52.4 s CC remains 52.4 s on the within-file axis). See [`geyser_tool/parsers/raw_reader.py`](geyser_tool/parsers/raw_reader.py).
+- **BigQuery `time_series.time_s`:** Uses **`time_continuous_s`** plus a cumulative offset when multiple RAW files (cycles) are stitched for one CLK. Optional synthetic gap between files: **`raw_ts.inter_cycle_gap_s`** in `config.yaml` (default **`0`** — no gap; set e.g. **`0.01`** if you want a small delimiter). See [`build_time_series_rows`](geyser_tool/upload/bigquery.py).
+- **Dashboards vs warehouse:** **`time_series`** is full fidelity for accuracy and ESR math. **`curves`** is **pre-thinned** (per `(cycle_no, step_no)` by default) so Looker line/scatter charts stay within typical **~5k–10k** point UI limits — tune under **`curves:`** in config.
 
 ## Quick Start
 
@@ -83,6 +89,8 @@ python -m geyser_tool.cli.main "D:\Electrical_tests\Cells\2026" --upload
 - **bq.service_account_key** – Path to JSON key (use forward slashes)
 - **paths.staging_root** – Folder where `--stage-only` writes `batch_YYYYMMDD_HHMMSS/` folders
 - **gcs.gcs_bucket**, **gcs.gcs_staging_prefix** – If set, `upload-batch` uploads Parquets here before loading BigQuery (`gs://<bucket>/<prefix>/<batch_name>/…`)
+- **raw_ts.inter_cycle_gap_s** – Extra seconds between stitched RAW cycle files on the global `time_s` axis (default **`0`**; set e.g. **`0.01`** for a legacy-style delimiter).
+- **curves.*** – Per-step curve downsampling for Looker (`curves_per_step_segment`, `max_points_per_cycling_segment`, `max_points_per_cv_segment`, etc.); see `config.example.yaml`.
 
 ## CLI
 

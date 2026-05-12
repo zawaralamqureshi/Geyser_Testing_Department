@@ -36,11 +36,31 @@ class GCSConfig:
 
 
 @dataclass
+class RawTimeseriesConfig:
+    """
+    BigQuery `time_series` is built by concatenating one RAW file per logged cycle.
+
+    Between files, upload adds ``inter_cycle_gap_s`` after each file's max time before
+    stitching the next file. That gap is synthetic (not in RAW). Default is ``0`` (no gap);
+    set e.g. ``0.01`` if you want a small delimiter between cycles.
+    """
+
+    inter_cycle_gap_s: float = 0.0
+
+
+@dataclass
 class CurvesConfig:
     max_points_per_run: int = 50_000  # Deprecated for time_series; kept for reference
-    target_points_per_step: int | None = None  # If set, downsample each step to ~this many points
-    points_per_cycle_cycling: int = 150  # Fixed points per cycle for CYCLING curves
-    points_per_cycle_cv: int = 1500  # Fixed points per cycle for CV curves
+    target_points_per_step: int | None = None  # Reserved for optional time_series downsampling (unused)
+    points_per_cycle_cycling: int = 150  # Used when curves_per_step_segment is False (legacy whole-cycle buckets)
+    points_per_cycle_cv: int = 1500
+    # Per-(cycle, step_no): preserves step boundaries (Charge/Discharge/RLAX) within a cycle — Looker-friendly
+    curves_per_step_segment: bool = True
+    max_points_per_cycling_segment: int = 100
+    max_points_per_cv_segment: int = 500
+    # When sample_rate_hz <= this threshold, shrink CV segments (helps low-rate dashboards)
+    min_points_per_cv_segment_if_low_rate_hz: float = 120.0
+    max_points_per_cv_segment_low_rate: int = 200
 
 
 @dataclass
@@ -49,6 +69,7 @@ class AppConfig:
     bq: BigQueryConfig = field(default_factory=BigQueryConfig)
     gcs: GCSConfig = field(default_factory=GCSConfig)
     esr: ESRConfig = field(default_factory=ESRConfig)
+    raw_ts: RawTimeseriesConfig = field(default_factory=RawTimeseriesConfig)
     curves: CurvesConfig = field(default_factory=CurvesConfig)
     object_to_index_regex: str = r"(\d{6}).*?(G\d+)_(\d{3})"
 
@@ -75,6 +96,7 @@ class AppConfig:
             ("bq", cfg.bq),
             ("gcs", cfg.gcs),
             ("esr", cfg.esr),
+            ("raw_ts", cfg.raw_ts),
             ("curves", cfg.curves),
         ):
             if section_name in data:

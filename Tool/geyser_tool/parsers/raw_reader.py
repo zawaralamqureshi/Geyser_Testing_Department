@@ -1,6 +1,23 @@
 """
 RAW file reader for time-series data (time, U, I, T, Q, E per sample).
-Time resets per step; this module concatenates time across steps for a continuous program timeline.
+
+**Per-step analyzer clock:** Within a single RAW export, ``Time,s`` resets to ``0``
+whenever the analyzer moves to a **new logged step**. The RAW ``Step`` column (e.g. ``6DCCC``)
+identifies the segment; contiguous rows sharing the exact same ``Step`` string belong to the
+same step instance.
+
+``add_continuous_time`` builds ``time_continuous_s`` = cumulative offset plus local ``Time,s``:
+
+- Whenever ``Step`` **changes** between successive rows, a new segment begins; the offset
+  used for subsequent rows jumps forward by ``max(Time,s)`` measured **within the previous segment**.
+  That reproduces total elapsed duration across steps **as recorded by the RAW file** — e.g.
+  a 52.4 s Charge CC contributes 52.4 s to the within-file continuum.
+
+Mapped fields:
+
+- ``step_no`` — integer prefix of ``Step`` (``7`` from ``7RLAX``).
+- ``step_marker`` — remainder (``RLAX``, ``DCCC``, …).
+- ``step_type`` — canonical bucket via ``STEP_TYPE_MAP`` matching ``clk_reader``.
 """
 
 from __future__ import annotations
@@ -84,8 +101,14 @@ def _to_step_type(marker: str) -> str:
 
 def add_continuous_time(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Time,s resets at each step. Add time_offset_s so that time_continuous_s = time_offset_s + Time,s
-    is monotonically increasing across the entire program.
+    Concatenate analyzer ``Time,s`` across **Step** transitions within one RAW export.
+
+    A new timeline segment begins whenever the ``Step`` cell differs from the previous row.
+    Each segment retains the RAW ``Time,s`` ramp (0 … duration-of-step).
+
+    Implemented by grouping contiguous runs of identical ``Step`` strings; cumulative offset before
+    each run equals sum of ``max(Time,s)`` observed in earlier runs --- matching per-step durations
+    in the RAW file (subject to parsing quality of the RAW table rows).
     """
     step_col = next((c for c in df.columns if c.lower().startswith("step")), None)
     time_col = next(

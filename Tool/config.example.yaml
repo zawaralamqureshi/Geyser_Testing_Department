@@ -22,7 +22,19 @@ esr:
   strict_mode: true
   tolerance_s: 0.0
 
+# Extra seconds between stitched RAW cycle files on BigQuery time_series.time_s (not in RAW files).
+# Default in code is 0; omit raw_ts or keep 0 — set e.g. 0.01 only if you want a synthetic delimiter.
+raw_ts:
+  inter_cycle_gap_s: 0.0
+
+# Curves table: downsampled for Looker; ESR still uses full-resolution time_series upstream.
 curves:
-  max_points_per_run: 50000   # No longer used for time_series
+  max_points_per_run: 50000   # Legacy; not used for time_series
+  curves_per_step_segment: true
+  max_points_per_cycling_segment: 100
+  max_points_per_cv_segment: 500
+  min_points_per_cv_segment_if_low_rate_hz: 120.0
+  max_points_per_cv_segment_low_rate: 200
+  # Legacy whole-cycle mode (if curves_per_step_segment: false):
   points_per_cycle_cycling: 150
   points_per_cycle_cv: 1500

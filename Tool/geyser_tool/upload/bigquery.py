@@ -322,12 +322,25 @@ def build_time_series_rows(
     run_id: str,
     index_id: str,
     raw_dfs: List[Tuple[int, pd.DataFrame]],
+    inter_cycle_gap_s: float = 0.0,
 ) -> List[Dict[str, Any]]:
     """
     Build time_series rows from RAW DataFrames.
     raw_dfs: list of (cycle_no, df) - cycle_no from filename or Cycle column.
     Time is concatenated across steps within each file; across files we add cycle offset.
-    All RAW data is stored with no downsampling; first and last point of every cycle preserved.
+
+    All RAW samples are emitted (no downsampling). Each row's ``time_s`` uses ``time_continuous_s``
+    (from :func:`raw_reader.read_raw_with_continuous_time`) plus a cumulative offset across prior
+    RAW files in ``raw_dfs``.
+
+    **Within-file steps:** Analyzer ``Time,s`` resets at each ``Step``. ``time_continuous_s``
+    is built in ``raw_reader.add_continuous_time`` by detecting contiguous runs of identical
+    RAW ``Step`` values; offsets advance using ``max(Time,s)`` within each segment, so durations
+    follow the RAW table.
+
+    **Between files:** adds ``max(time_in_this_file) + inter_cycle_gap_s`` before stitching the
+    next cycle file — ``inter_cycle_gap_s`` is synthetic (not in RAW). Default is ``0``; set a
+    small positive value (e.g. ``0.01``) if you want a delimiter between stitched files.
     """
     rows: List[Dict[str, Any]] = []
     global_time_offset = 0.0
@@ -363,7 +376,7 @@ def build_time_series_rows(
             }
             rows.append(r)
 
-        global_time_offset += max_time_in_file + 0.01  # small gap between cycles
+        global_time_offset += max_time_in_file + inter_cycle_gap_s
 
     return rows
 
@@ -469,14 +482,22 @@ def process_and_build_rows(
                     pass
             raw_dfs_list.append((cy, df))
         if raw_dfs_list:
-            ts_rows = build_time_series_rows(run_id, summary.index_id, raw_dfs_list)
+            ts_rows = build_time_series_rows(
+                run_id,
+                summary.index_id,
+                raw_dfs_list,
+                inter_cycle_gap_s=cfg.raw_ts.inter_cycle_gap_s,
+            )
             esr_rows = build_esr_computed_rows(
                 run_id, summary.index_id, raw_dfs_list, config=cfg
             )
+            sample_hz_plot: Optional[float] = None
+            if header.data_period_s and header.data_period_s > 0:
+                sample_hz_plot = 1.0 / header.data_period_s
             curve_rows = build_curves_rows(
                 ts_rows,
-                points_per_cycle_cycling=cfg.curves.points_per_cycle_cycling,
-                points_per_cycle_cv=cfg.curves.points_per_cycle_cv,
+                config=cfg.curves,
+                sample_rate_hz=sample_hz_plot,
             )
 
     return run_id, tr, cm, sm, ts_rows, esr_rows, curve_rows
