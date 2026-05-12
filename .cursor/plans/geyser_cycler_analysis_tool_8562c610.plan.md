@@ -187,7 +187,7 @@ Values written to BigQuery as `**test_runs.protocol_detected`**:
 
 ### 3A. Target data model for program steps
 
-Each program header is parsed into a list of `ProgramStep` objects:
+Each program header is parsed into a list of `ProgramStep` objects. **Implementation note:** `**params`** and `**cycle_ref`** are ~~partial~~ / ~~future-ready~~ — today **`pipeline`** fills **`step_num`** and **`mode`** text only (detection operates on concatenated **`mode`** strings).
 
 ```python
 @dataclass
@@ -198,17 +198,19 @@ class ProgramStep:
     cycle_ref: tuple   # (target_step, n_times) if this is a "Cycle to step X, N times"
 ```
 
-### 3B. Historical SOP-aligned pattern taxonomy (*superseded for labels; design reference*)
+### ~~3B. Historical SOP-aligned pattern taxonomy~~ — **LEGACY / ARCHIVE ONLY**
+
+> **Withdrawn as product spec.** The **only** `protocol_detected` values emitted by ingestion are **`CYCLABILITY`**, **`STANDARD_CELL`**, **`BLOCK_SCANNING`**, **`BLOCK_CYCLING`**, **`UNKNOWN`** (see §3.0). The table below is **historical SOP cross-reference only** — rows marked ~~not shipped~~ align with ~~**extra registry labels**~~ / ~~**DCIR**~~ under **§ Permanently out of scope**.
 
 
-| Protocol Label        | Step Sequence Pattern                                                                           | Source Doc                        |
-| --------------------- | ----------------------------------------------------------------------------------------------- | --------------------------------- |
-| `STANDARD_CELL`       | High-level CCC/SNU/DCC sequencing (conceptual SOP §3C)                                          | SOP Section 3                     |
-| ~~`VTT_TEST1_BLOCK`~~ | *(label retired in code)* replaced by `**BLOCK_SCANNING`** / `**BLOCK_CYCLING*`* heuristic rows | Was ToS §7 wording - Discontinued |
-| `VTT_FCRD_NONZINC`    | `CCC -> CCV -> TableP -> DCC`                                                                   | ToS Section 8                     |
-| `CYCLABILITY`         | `CCC(to 1.70V) -> DCC(to 0.80V) -> Cycle(N>=1000)`                                              | SOP Section 5                     |
-| `REFERENCE_GCD`       | `CCC(0.85->1.70V) -> DCC(1.72->0.80V) -> Rest(2min) -> Cycle(3)`                                | SOP Section 5 - Discontinued      |
-| `DCIR_SOC`            | Complex pulse sequence with rest                                                                | SOP Section 6                     |
+| Protocol Label                                                         | Step Sequence Pattern                                                                           | Source Doc                        |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | --------------------------------- |
+| `STANDARD_CELL`                                                        | High-level CCC/SNU/DCC sequencing (conceptual SOP §3C) *(aligns with implemented label §3.0)*     | SOP Section 3                     |
+| ~~`VTT_TEST1_BLOCK`~~                                                  | ~~*(label retired in code)* replaced by **`BLOCK_SCANNING`** / **`BLOCK_CYCLING`**~~            | ~~Was ToS §7 wording - Discontinued~~ |
+| ~~`VTT_FCRD_NONZINC`~~ *(**not implemented**)*                         | ~~`CCC -> CCV -> TableP -> DCC`~~                                                               | ~~ToS Section 8~~                 |
+| `CYCLABILITY` *(aligns with implemented label §3.0)*                    | SOP-style cyclability narrative; **code** uses **`> 20`** cycles + cell vs block discharge spelling (§3.0) | SOP Section 5                     |
+| ~~`REFERENCE_GCD`~~ *(**not implemented**)*                            | ~~`CCC(0.85->1.70V) -> DCC(1.72->0.80V) -> Rest(2min) -> Cycle(3)`~~                             | ~~SOP Section 5~~                 |
+| ~~`DCIR_SOC`~~ *(**not implemented** — DCIR tooling out of scope)*     | ~~Complex pulse sequence with rest~~                                                             | ~~SOP Section 6~~                 |
 
 
 If **no** implemented rule matches (§3.0 + YAML + fallbacks), the protocol is `**UNKNOWN`**; CLK / RAW metrics are still ingested.
@@ -258,41 +260,11 @@ These are the **primary source of truth** for all protocols.
 
 **Block-style discharge ESR:** When block programs match the same protocol + program-text gates, the same boundary logic applies per RAW segment (not “average of last 5 cycles” in code unless added later).
 
-### 4C. Protocol-specific metric rules (dispatch table — *design sketch*)
+### ~~4C. Protocol-specific metric rules (dispatch table)~~ — **LEGACY / NOT IMPLEMENTED**
 
-*Generated for planning; `**geyser_tool` does not currently centralize routing in a `PROTOCOL_METRICS` dictionary. ESR/curve pipelines may still behave largely independent of `**protocol_detected*`* — confirm in `**analysis/`** and `**upload/bigquery.py**` when wiring protocol-aware behaviour.*
+> **Withdrawn.** There is **no** `PROTOCOL_METRICS` dictionary in the codebase. Per-protocol routing for ESR and curves was **never** centralized this way — see **`analysis/esr.py`**, **`upload/bigquery.py`**, **`analysis/curves.py`**. ~~A long illustrative Python sketch lived here in older plan revisions~~ — **omitted** (never landed in repo).
 
-```python
-PROTOCOL_METRICS = {
-    "STANDARD_CELL": {
-        "esr_recompute": True,
-        "esr_windows_s": [0.010, 1.0],
-        "esr_reference_cycle": "last_5_avg",
-        "capacitance_source": "clk",        # trust cycler computation
-        "qref_eref_cycle": 3,               # 3rd discharge cycle
-        "build_ocv_soc": True,
-        "curves": ["CV", "CYCLING"],
-    },
-    "BLOCK_CYCLING": {  # formerly sketched as VTT_TEST1_BLOCK
-        "esr_recompute": True,
-        "esr_windows_s": [0.010, 1.0],
-        "esr_reference_cycle": "last_5_avg",
-        "capacitance_source": "clk",
-        "kpi_report": True,                 # generate pass/fail KPIs per ToS
-        "curves": ["CYCLING"],
-    },
-    "CYCLABILITY": {
-        "esr_recompute": True,               # boundary ESR when DCC→RLX + program gates (2026)
-        "track_degradation": True,
-        "curves": ["CYCLING"],
-    },
-    "UNKNOWN": {
-        "esr_recompute": False,
-        "capacitance_source": "clk",
-        "curves": ["CYCLING"],
-    },
-}
-```
+~~Archived `PROTOCOL_METRICS` Python sketch removed from this plan (never existed in repo).~~ Use **`analysis/esr.py`**, **`upload/bigquery.py`**, **`analysis/curves.py`** for routing truth.
 
 ### 4D. RAW time-series storage (all RAW files)
 
@@ -544,8 +516,9 @@ The following original “Phase 3 remaining” bullets are **closed** — do not
 - **Per-table fingerprint**: Implemented. Fingerprint from file metadata; skip when all match; `--force` / `--force-run` override. `run_fingerprints` table stores per-table fingerprints.
 - **Parquet-GCS upload**: Implemented. When `gcs.gcs_bucket` set: stage to parquet, upload to GCS, BigQuery loads from GCS. Memory-efficient; fallback to in-memory when bucket not set.
 - **Split stage and upload**: Implemented. Stage to Parquet only (no GCS/Big); then Upload batch (select folder → GCS → BigQuery). Batches include `run_fingerprints.json` for fingerprint upsert on deferred upload.
-- **Dynamic max_points_per_run**: Derive from Data recording period in CLK/RAW header; avoid downsampling for 100 Hz (cells) and 10 Hz (blocks) tests.
-- Unit tests (optional but recommended)
+- ~~**Dynamic max_points_per_run** (derive from analyzer **Data recording period** in header so 100 Hz / 10 Hz never get over-downsampled)~~ — **not implemented.** Curve thinning is **`curves.*`** in `config.yaml`; full-rate data remains in **`time_series`**. Optional warehouse-only tuning is **`phase3-dynamic-max-points`** in frontmatter (*cost*, not smarter sampling).
+
+- ~~Unit tests~~ — **Permanently out of scope** (see § Permanently out of scope).
 
 ---
 
@@ -569,24 +542,39 @@ The following original “Phase 3 remaining” bullets are **closed** — do not
 
 ## 9. Config defaults
 
+**Canonical example:** mirror [`Tool/config.example.yaml`](../Tool/config.example.yaml). ~~Earlier plan drafts used flat keys (`output_staging_dir`, `bigquery_project`, `esr_recompute_enabled`, `curve_max_points`, `tags_override_heuristics`, …); those **never** matched [`AppConfig`](../Tool/geyser_tool/config.py).~~
+
 ```yaml
-output_staging_dir: "D:\\Electrical_tests\\_staging"
-bigquery_project: "geyser-testing"
-bigquery_dataset: "electrical_tests"
-service_account_key: "path/to/key.json"
+# Current shape — see Tool/config.example.yaml for comments and full keys.
 
-esr_recompute_enabled: true
-esr_delays_s: [0.010, 1.0]
-esr_strict_mode: true          # legacy; boundary ESR ignores strict/tolerance (see README)
-esr_tolerance_s: 0.0
+paths:
+  cells_root: D:\Electrical_tests\Cells
+  blocks_root: D:\Electrical_tests\Blocks
+  staging_root: D:\Electrical_tests\_staging
 
-object_to_index_regex: "(\d{6}).*?(G\d+)_(\d{3})"
-entity_rules:
-  cell_path_pattern: "Cells"
-  block_path_pattern: "Blocks"
+bq:
+  project: geyser-testing-department
+  dataset: electrical_tests
+  service_account_key: null  # optional; ADC if null
 
-curve_max_points: 2000
-tags_override_heuristics: true
+gcs:
+  gcs_bucket: ""
+  gcs_staging_prefix: staging/
+
+esr:
+  delays_s: [0.010, 1.0]
+  strict_mode: true   # boundary ESR ignores; kept for compat
+  tolerance_s: 0.0
+
+raw_ts:
+  inter_cycle_gap_s: 0.0   # synthetic gap between stitched RAW files on time_s
+
+curves:
+  max_points_per_run: 50000   # legacy / whole-run cap when not segmenting
+  curves_per_step_segment: true
+  max_points_per_cycling_segment: 100
+  max_points_per_cv_segment: 500
+  # ... see config.example.yaml
 ```
 
 ---
@@ -601,7 +589,7 @@ tags_override_heuristics: true
 | DuckDB (week + master)                              | **Removed**                          | Replaced by BigQuery as canonical DB per your Google Suite requirement |
 | Streamlit dashboard                                 | **Removed**                          | Replaced by Looker Studio                                              |
 | Local weekly Parquet partitions as DB               | **Simplified** to staging cache only | BigQuery is the master; local Parquet is just a upload buffer          |
-| Heuristic step detection (fallback)                 | **Deferred** (low priority)          | Header + step tags suffice for current protocols                       |
+| ~~Heuristic step detection~~ (fallback)               | **LEGACY — not planned**             | ~~Deferred~~ superseded; no standalone fallback detector on roadmap — header + **`Step`** column drive parsing |
 | ~~dQ/dV recomputation from I*dt~~                   | **Not in scope**                     | See § Permanently out of scope                                         |
 | ~~Automated pytest~~                                | **Not in scope**                     | See § Permanently out of scope                                         |
 | ~~Protocol explorer UI~~                            | **Not in scope**                     | See § Permanently out of scope                                         |

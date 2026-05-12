@@ -8,14 +8,14 @@ paths:
 
 bq:
   project: geyser-testing
+  dataset: electrical_tests
+  # Path to service account JSON key (optional; uses Application Default Credentials if omitted)
+  service_account_key: null  # e.g. path/to/geyser-testing-key.json
 
 gcs:
   # If set, parquet is uploaded to GCS and BigQuery loads from GCS (memory-efficient)
   gcs_bucket: ""
   gcs_staging_prefix: staging/
-  dataset: electrical_tests
-  # Path to service account JSON key (optional; uses Application Default Credentials if omitted)
-  service_account_key: null  # e.g. path/to/geyser-testing-key.json
 
 esr:
   delays_s: [0.010, 1.0]

@@ -1,106 +1,343 @@
-Geyser Cycler Analysis Tool — condensed living plan (human-readable)
-========================================================================
-The canonical detailed plan with changelog is:
+Geyser Cycler Analysis Tool — living human-readable summary
+================================================================
+
+This file is a **standalone overview** so someone can understand the program
+without opening the code. The longer engineering record (phases, changelog,
+superseded narrative) lives at:
+
   .cursor/plans/geyser_cycler_analysis_tool_8562c610.plan.md
 
-When answering “what is left in the plan”, DO NOT list items under
-“Permanently out of scope” below (they are closed, not backlog).
+Primary user-facing detail (CLI flags, ESR semantics, protocol order):
+
+  Tool/README.md
+
+Looker dimensions, chart guidance, protocol filters:
+
+  Tool/docs/LOOKER_SETUP.md
+
+Example configuration (copy to Tool/config.yaml):
+
+  Tool/config.example.yaml
 
 
-Permanently out of scope (authoritative — do not repeat as “remaining work”)
------------------------------------------------------------------------------
-  ~~Automated pytest~~
-  ~~Protocol “explorer” UI~~
-  ~~DCIR extractor~~
-  ~~dQ/dV (not in curves / analysis)~~
-  ~~Extra registry labels~~ (e.g. Reference GCD, FCR-D, legacy SOP-specific rows)
+Permanently out of scope (authoritative — do not treat as backlog)
+-------------------------------------------------------------------
+These are **closed** product decisions. Do not list them as “remaining work”:
 
-Optional / may still appear when asking “what’s left”: PyInstaller EXE for lab PCs;
-optional warehouse policy for time_series row volume; README / LOOKER_SETUP / plan hygiene.
+  - Automated pytest / committed CI test suite
+  - Protocol “explorer” UI or CLI
+  - DCIR extraction from RAW
+  - dQ/dV in curves or analysis
+  - Extra protocol registry labels (e.g. Reference GCD, FCR-D rows) unless
+    explicitly re-scoped
 
+Still **optional / deferred** (may legitimately appear on a short backlog):
 
-1. Goal
--------
-- Protocol-aware Python tool: read CLK + RAW from D:\Electrical_tests\Cells and Blocks\
-  (paths configurable), parse headers and step tags, detect protocol, ingest CLK metrics,
-  optional full RAW → BigQuery time_series, boundary-based ESR for selected protocols,
-  Looker-friendly curves (CYCLING + CV/SNU; no dQ/dV), upload to BigQuery, optional GCS
-  staging, per-table fingerprints, smart skip, Tkinter GUI + CLI, Looker dashboards.
-
-- Trigger: Tkinter “Update BigQuery” or CLI (--upload, --stage-only, --upload-batch, ...).
+  - PyInstaller one-file EXE for lab PCs (scripts/build_exe.bat exists)
+  - Warehouse policy if `time_series` row volume or BigQuery cost becomes an issue
+  - README / LOOKER_SETUP / plan sync when behaviour changes
 
 
-2. Paths, IDs
--------------
-- Primary: Object: header + YYMMDD patterns → index_id, date_ymd, group_id, test_date.
-- Folder layouts flexible; tool does not require strict YYYY\MM\DD\N_Gnn\NNN.
-
-
-3. Step tags
-------------
-- Mapped in clk_reader STEP_TYPE_MAP → canonical step_type (CCC, DISCHARGE_CC, SCAN_V,
-  RELAX, …). RAW reader aligns Step column with same mapping.
-
-
-4. Protocol detection
----------------------
-- Labels in BQ test_runs.protocol_detected: STANDARD_CELL, BLOCK_SCANNING, BLOCK_CYCLING,
-  CYCLABILITY, UNKNOWN. CYCLABILITY evaluated before YAML registry; registry.yaml defines
-  keyword rows; detector.py has fallbacks.
-
-
-5. Metrics
+1. Purpose
 ----------
-5.1 CLK — trusted per-step + GNRL (capacity, energy, ESR fields from cycler, efficiencies, …).
+Windows-oriented Python tooling for **Geyser** (ASK75 / ACK75) electrical
+cycler data. It:
 
-5.2 ESR from RAW (implemented 2026)
-- Boundary method in geyser_tool/analysis/esr.py.
-- Runs only if protocol_detected is STANDARD_CELL, BLOCK_CYCLING, or CYCLABILITY AND
-  program text matches a 1 s rest (Rest 1s, Rest during 1s, patterns in program_has_rest_1s).
-- Each DCC/DCCC/DCHCC segment immediately followed by RLX/RLAX: last discharge V and |I|;
-  delay_s ~0.01 → first RLX voltage; delay_s 1.0 → last RLX voltage; esr_ohm = (v_at - v_end) / |I|.
-- esr.strict_mode / tolerance_s do not affect this path; delays still from esr.delays_s.
+  - Finds `*-CLK.txt` files under configurable **Cells** and **Blocks** roots.
+  - Parses analyzer headers (**Object:**, **Program:**, metadata).
+  - Classifies **`protocol_detected`** from program text (+ YAML registry +
+    Python rules for CYCLABILITY).
+  - Loads **trusted** cycle/step metrics from CLK into BigQuery.
+  - Optionally discovers companion **RAW** files, builds **`time_series`**
+    (full sample rate — no downsampling), **`curves`** (Looker-sized
+    downsampling), and **`esr_computed`** (boundary-based ESR from RAW when
+    gates pass).
+  - Stages columnar **Parquet** locally; optionally uploads to **GCS** and
+    **loads BigQuery**; maintains **per-table fingerprints** so unchanged runs
+    can skip reprocessing unless forced.
 
-5.3 Curves — downsampled from in-memory time_series rows; per (cycle_no, step_no) by default;
-  CV segment caps; no dQ/dV.
-
-
-6. BigQuery tables
-------------------
-- test_runs, cycle_metrics, step_metrics, time_series (full RAW), esr_computed, curves,
-  run_fingerprints.
-
-
-7. Architecture (key modules)
------------------------------
-- geyser_tool/config.py, pipeline.py, ids.py
-- parsers: header, clk_reader, raw_reader
-- protocol: detector.py, registry.yaml, program_model.py
-- analysis: esr.py, curves.py
-- upload: bigquery.py, staging.py, fingerprint.py
-- gui/app.py, cli/main.py
-- scripts/setup_bigquery.py, migrate_* as needed
-
-(There is no sniffer.py in the current tree; tests/ and PyInstaller scripts are optional
- ad hoc, not a committed test suite or shipping artifact.)
+Triggers: **`python -m geyser_tool.cli.main`** with paths and flags, or
+**`python -m geyser_tool.gui.app`** (Tkinter) for browse / stage / upload.
 
 
-8. Phases — status (high level)
+2. Where the code lives
+------------------------
+Under the **`Tool/`** directory (package **`geyser_tool`**):
+
+  - **`geyser_tool/config.py`** — `AppConfig`: paths, bq, gcs, esr, raw_ts,
+    curves, regex for IDs.
+  - **`geyser_tool/pipeline.py`** — orchestration: parse → fingerprint check →
+    metrics → RAW → analyses → staging / upload hooks.
+  - **`geyser_tool/ids.py`** — `run_id`, `index_id`, `entity_type`, dates from
+    `Object:` + path conventions.
+  - **`geyser_tool/parsers/`** — `header`, `clk_reader`, `raw_reader`.
+  - **`geyser_tool/protocol/`** — `detector.py`, `registry.yaml`,
+    `program_model.py`.
+  - **`geyser_tool/analysis/`** — `esr.py`, `curves.py`.
+  - **`geyser_tool/upload/`** — `bigquery.py`, `staging.py`, `fingerprint.py`,
+    `auth.py`.
+  - **`geyser_tool/cli/main.py`**, **`geyser_tool/gui/app.py`**.
+  - **`scripts/setup_bigquery.py`**, **`scripts/migrate_*.py`** — schema setup
+    and additive migrations.
+
+
+3. End-to-end flow (one CLK run)
+---------------------------------
+1. **Discovery** — Recurse directories (or explicit paths) for `*-CLK.txt`.
+2. **Header / program** — Read metadata; program lines → `ProgramStep` list
+   (today **`step_num`** + **`mode`** strings; richer `params` / `cycle_ref`
+   are not fully populated).
+3. **Protocol** — Uppercase modes, join text, run `detect_protocol()` → value
+   stored on **`test_runs.protocol_detected`**.
+4. **IDs** — Derive **`index_id`**, **`entity_type`** (**cell** / **block**),
+   **`date_ymd`**, **`group_id`**, **`test_date`**. **`entity_type`** comes from
+   path/object patterns, **not** from protocol name.
+5. **Fingerprints** — Per-table fingerprints from file paths, sizes, mtimes.
+   Compared to **`run_fingerprints`** in BigQuery. All match ⇒ skip unless
+   **`--force`** or **`--force-run <run_id>`**.
+6. **CLK metrics** — Tabular **`GNRL`** and per-step rows → **`cycle_metrics`**,
+   **`step_metrics`**; aggregates for charge/discharge capacity and energy where
+   applicable.
+7. **RAW** (unless **`--no-raw`**) — Sibling RAW files parsed; stitched
+   **`time_series`**; optional synthetic gap **`raw_ts.inter_cycle_gap_s`**
+   between RAW files on global **`time_s`** (default **0**).
+8. **ESR** — If protocol + program rest-phrase gates pass, **`esr_computed`**
+   rows from discharge→relax boundaries (see §6).
+9. **Curves** — Downsampled from in-memory trajectory for dashboards; default
+   is per **`(cycle_no, step_no)`** segment (**`curves.curves_per_step_segment`**).
+10. **Output** — Parquet batch under **`paths.staging_root`**; upload to GCS if
+    **`gcs.gcs_bucket`** set; **`LOAD`** into dataset **`bq.dataset`**; upsert
+    fingerprints.
+
+
+4. Inputs: CLK and RAW layouts
+-------------------------------
+Paths default under **`D:\Electrical_tests\`** (`Cells`, `Blocks`, `_staging`);
+override in **`paths.*`** in config.
+
+**CLK** — One summary file per test object channel run; naming `*-CLK.txt`.
+
+**RAW** — Per-cycle ASCII tables; discovery differs slightly:
+
+  - **Blocks (ACK75.48)** — Often under a **`RAW/`** subfolder beside the CLK
+    numbering folder.
+  - **Cells (ACK75.10)** — Often under **`{object_id}-RAW/`**.
+
+The RAW reader aligns **`Step`** markers with the same canonical **`step_type`**
+concept as CLK (see **`clk_reader.STEP_TYPE_MAP`** and RAW reader).
+
+
+5. Canonical step tags (concept)
+----------------------------------
+ASK/ACK step markers (**CHCC**, **DCCC**, **SNU**, **RLAX**, …) map to a smaller
+set of **`step_type`** values (**CCC**, **DCC**, **SCAN_V**, **RELAX**, …) for
+downstream logic and BigQuery columns. Full mapping lives in code, not here.
+
+
+6. Protocol detection (**`test_runs.protocol_detected`**)
+------------------------------------------------------------
+Emitted values are **exactly**:
+
+  **`CYCLABILITY`**, **`STANDARD_CELL`**, **`BLOCK_SCANNING`**,
+  **`BLOCK_CYCLING`**, **`UNKNOWN`**
+
+**Deterministic order** (see **`Tool/geyser_tool/protocol/detector.py`**):
+
+1. **CYCLABILITY** — Evaluated **before** **`registry.yaml`**. Separate **cell**
+   vs **block** branches using **`Discharge CC`** (correct) vs typo
+   **`Discarge CC`**; cycle count thresholds use **strict `>` 20** (e.g.
+   **`Preset number of cycles: N`** with **N > 20** on blocks; analogous logic on
+   cells with **`Cycle to step … <n> times`**). Confidence typically **0.5**.
+
+2. **YAML registry** — Rows in **`geyser_tool/protocol/registry.yaml`** in file
+   order (**`keywords_all`**, **`keywords_any`**, optional **`min_steps`**).
+
+3. **Fallback heuristics** — If YAML missing or nothing matches.
+
+Changing **BLOCK_\*** keywords: edit **`registry.yaml`**. Changing **CYCLABILITY**
+thresholds/shape: edit **`detector.py`**.
+
+Historical SOP names (**VTT_TEST1_BLOCK**, **REFERENCE_GCD**, **VTT_FCRD_NONZINC**,
+**DCIR_SOC**, …) are **not** emitted labels — see archived **§3B** in the long
+plan; some align with permanently out-of-scope items.
+
+
+7. Trusted CLK metrics (**`cycle_metrics`**, **`step_metrics`**)
+------------------------------------------------------------------
+ CLK already contains capacities, energies, cycler-derived ESR fields,
+ efficiencies, durations, etc. These are ingested **as-is** — the tool does not
+ recompute **`Q,Ah`**, **`E,Wh`**, **`C,F`**, **`ER*,mR`**, **`ESR,mR`** for
+ warehousing (boundary ESR is a **parallel** **`esr_computed`** pathway).
+
+
+8. RAW time axes and **`time_series`**
+---------------------------------------
+Within one RAW file, **`Time,s`** resets at each **`Step`** change. The reader
+computes **`time_continuous_s`** by summing **`max(Time,s)`** over contiguous runs
+of the same step marker so physical duration matches the table.
+
+Across multiple RAW files (cycles) stitched for one CLK, BigQuery **`time_series.time_s`**
+extends that axis; **`raw_ts.inter_cycle_gap_s`** adds an optional synthetic gap
+between files (default **0**; e.g. **0.01** s if you want a visible delimiter).
+
+
+9. Boundary ESR (**`esr_computed`**)
+--------------------------------------
+Implemented in **`geyser_tool/analysis/esr.py`**. Rows exist only when:
+
+  - **`protocol_detected`** ∈ { **`STANDARD_CELL`**, **`BLOCK_CYCLING`**,
+    **`CYCLABILITY`** }, **and**
+  - joined program text matches a **1 s rest** pattern (e.g. **`Rest 1s`**,
+    **`Rest during 1s`**, helpers in **`program_has_rest_1s`**).
+
+For each RAW segment labelled **discharge** (**DCC**, **DCCC**, **DCHCC**)
+followed contiguously by **RLX / RLAX**:
+
+  - **`delay_s` ≈ 0.01** — **`v_at_delay_v`** = **first** voltage sample on the
+    relax step; **`v_end_v`** = **last** discharge voltage; **`esr_ohm`** =
+    (**`v_at_delay_v`** − **`v_end_v`**) ÷ |**I**| from last discharge row.
+  - **`delay_s` = 1.0** — **`v_at_delay_v`** = **last** relax voltage (~1 s end).
+
+Multiple pairs per RAW file when the sequence repeats.
+
+**`esr.strict_mode`** and **`esr.tolerance_s`** **do not** affect this pathway;
+they are legacy knobs. **`esr.delays_s`** selects which delay columns (**0.01**
+and/or **1.0**) appear.
+
+
+10. **`curves`** table (Looker-facing)
+--------------------------------------
+Built from the same RAW trajectory but **downsampled**. Default mode: one budget
+per **`(cycle_no, step_no)`** (**`curves_per_step_segment: true`**) so step
+boundaries survive for Cycling + CV charts. CV segments have separate caps,
+including tighter limits when **`sample_rate_hz`** is low (see **`curves.py`**
+and config). **No dQ/dV.**
+
+**Full fidelity remains in `time_series`.** Tune chart density under **`curves:`**
+in **`config.yaml`**; see **`Tool/config.example.yaml`** for all keys.
+
+
+11. Fingerprints and smart skip
+---------------------------------
+**`run_fingerprints`** stores one fingerprint per (**`run_id`**, **`table_name`**).
+
+Fingerprints derive from RAW/CLK **file metadata** (paths, mtimes, sizes), not a
+full file hash of contents. **`--force`** ignores all skips; **`--force-run`** can
+target specific runs.
+
+Staged batches include **`run_fingerprints.json`** for deferred **`--upload-batch`**.
+
+
+12. Staging, GCS, BigQuery loads
 --------------------------------
-- Phase 1 (parsers, protocol, IDs, BQ, auth, staging, Tkinter GUI, CLI, basic Looker): done.
-- Phase 2 (RAW, time axis, curves table, ESR boundary, docs): done for in-scope items.
-- Phase 3 (fingerprints, GCS load, stage/upload split): done.
-- Optional still: PyInstaller EXE; optional time_series cost tuning.
+  - **`--upload`** — Full path: process → Parquet staging → optionally GCS →
+    BigQuery load + fingerprint upsert.
+  - **`--upload --stage-only`** — Writes **`batch_YYYYMMDD_HHMMSS`** under
+    **`paths.staging_root`** with **`*.parquet`**, **`run_ids.txt`**,
+    **`run_fingerprints.json`** — no cloud upload.
+  - **`--upload-batch <folder>`** — Consume that batch folder; deletes existing
+    BigQuery rows for listed **`run_ids`** then reloads (idempotent correction
+    workflow).
 
-Excluded permanently: see top of this file.
+If **`gcs.gcs_bucket`** is empty, loaders can stream from memory / local
+Parquet without GCS (**`staging.py`** / **`bigquery.py`**).
 
 
-9. What’s left (for assistants / future sessions)
+13. BigQuery tables (conceptual)
+---------------------------------
+| Table            | Role |
+|------------------|------|
+| test_runs        | One row per processed CLK — metadata, protocol, ids, paths |
+| cycle_metrics    | Per-cycle (**GNRL**) metrics |
+| step_metrics     | Per-step CLK metrics |
+| time_series      | Full RAW samples (all points) |
+| curves           | Downsampled Cycling + CV traces for charts |
+| esr_computed     | Boundary ESR from RAW where gated |
+| run_fingerprints | Skip / change detection |
+
+Dataset default **`electrical_tests`**; project from **`bq.project`** (see
+ **`setup_bigquery.py`** migrations for additive columns).
+
+
+14. CLI (summary)
+-----------------
+Run from **`Tool/`**: **`python -m geyser_tool.cli.main [--config PATH]`**
+
+  - **paths** — CLK files or directories (unless **`--upload-batch`** only).
+  - **`--upload`** — Enables BigQuery-oriented processing.
+  - **`--stage-only`** — With **`--upload`**: Parquet batch only.
+  - **`--upload-batch DIR`** — Load an existing staged batch.
+  - **`--no-raw`** — CLK only (no **`time_series`**, no RAW-derived curves/ESR).
+  - **`--dry-run`** — Process without cloud upload (direct upload flow).
+  - **`--force`**, **`--force-run RUN_ID`** — Fingerprint overrides.
+
+Full table: **`Tool/README.md`**.
+
+
+15. GUI (summary)
+-----------------
+**`python -m geyser_tool.gui.app`**
+
+Rough alignment with CLI: browse folder, scan headers, **Stage to Parquet**,
+**Upload batch…**, **Update BigQuery**, **Force re-upload** checkbox.
+
+
+16. Configuration reference (**`Tool/config.yaml`**)
+------------------------------------------------------
+Structured sections (**not** legacy flat **`bigquery_project`** keys):
+
+  - **`paths`** — **`cells_root`**, **`blocks_root`**, **`staging_root`**
+  - **`bq`** — **`project`**, **`dataset`**, **`service_account_key`** (optional;
+    ADC if null)
+  - **`gcs`** — **`gcs_bucket`**, **`gcs_staging_prefix`**
+  - **`esr`** — **`delays_s`**, **`strict_mode`**, **`tolerance_s`**
+  - **`raw_ts`** — **`inter_cycle_gap_s`**
+  - **`curves`** — per-step caps, CV low-rate tuning, legacy whole-cycle mode
+    when **`curves_per_step_segment: false`**
+
+Root **`object_to_index_regex`** — pattern for extracting **`index_id`** parts.
+
+Defaults and comments: **`Tool/config.example.yaml`**; dataclass defaults:
+ **`geyser_tool/config.py`**.
+
+
+17. Setup and migrations (one-time / occasional)
 -------------------------------------------------
-When summarizing remaining work, cite only:
-  - Optional PyInstaller packaging
-  - Optional BigQuery/time_series cost policy if spend becomes an issue
-  - Ongoing README / LOOKER_SETUP / plan sync when behaviour changes
+Fresh BigQuery dataset/tables:
 
-Do NOT surface: pytest, protocol explorer, DCIR, dQ/dV, extra registry labels — those are
-out of scope by product decision.
+  **`python -m scripts.setup_bigquery --project … --key …`**
+
+If tables pre-existed, run the appropriate **`migrate_*.py`** scripts (see
+**`Tool/README.md`**) for columns such as **`date_ymd`**, **`group_id`**,
+**`capacity_charge_ah`**, **`run_fingerprints`**, etc.
+
+
+18. Phases status (historical shorthand)
+-----------------------------------------
+  - Phase 1 — Parsers, protocol, IDs, BQ ingest, staging, Tkinter GUI, CLI,
+    basic Looker: **done**.
+  - Phase 2 — RAW ingestion, **`time_series`**, boundary ESR, **`curves`**,
+    docs: **done** for in-scope items.
+  - Phase 3 — Fingerprints, GCS load path, split stage/upload: **done.**
+
+Optional remnants: packaging EXE; cost policy.
+
+
+19. When behaviour changes — what to edit
+--------------------------------------------
+Typical coupling (also in the `.plan.md` front matter):
+
+  - UX / CLI / flags → **`Tool/README.md`**
+  - Dashboard field names → **`Tool/docs/LOOKER_SETUP.md`**
+  - BLOCK\_* keywords → **`geyser_tool/protocol/registry.yaml`**
+  - CYCLABILITY rules → **`geyser_tool/protocol/detector.py`**
+  - Changelog / backlog prose → **`.cursor/plans/geyser_cycler_analysis_tool_8562c610.plan.md`**
+  - This short summary → **`plan.txt`** (this file)
+
+
+20. Workspace root (absolute path reminder)
+--------------------------------------------
+Everything above is relative to the repository folder, e.g.
+
+  `h:\Shared drives\R&D_Mikkeli\Zawar Qureshi\Geyser Testing Department\`
+
