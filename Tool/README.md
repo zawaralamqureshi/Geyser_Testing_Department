@@ -199,7 +199,18 @@ Controls:
 | step_metrics | Per-step metrics |
 | time_series | Raw time-series (time, V, I, T, Ah, Wh) |
 | curves | Downsampled CYCLING/CV curves |
-| esr_computed | Recomputed ESR at 10ms/1s |
+| esr_computed | ESR from RAW step boundaries for Standard Cell / Block cycling / Cyclability (see below) |
+
+### `esr_computed` (boundary method)
+
+ESR rows are emitted only when **`test_runs.protocol_detected`** is one of **`STANDARD_CELL`**, **`BLOCK_CYCLING`**, or **`CYCLABILITY`**, and the CLK **Program** text indicates a **1 s rest** — e.g. **`Rest 1s`**, **`Rest during 1s`**, or other matches from **`program_has_rest_1s`** in [`geyser_tool/analysis/esr.py`](geyser_tool/analysis/esr.py).
+
+For **each** RAW segment whose step marker is **`DCC`**, **`DCCC`**, or **`DCHCC`** and whose **next** contiguous segment is **`RLX`** or **`RLAX`**:
+
+- **`delay_s` ≈ 0.01** — **`v_at_delay_v`** is the **first** voltage sample of the RLX step; **`v_end_v`** is the **last** voltage of the discharge step; **`esr_ohm`** = (**`v_at_delay_v` − `v_end_v`**) / **`current_a`** (|I| from the last discharge row). The **`delay_s`** column label is unchanged; the value is the **first RLX sample**, not a time-interpolated 10 ms point.
+- **`delay_s` = 1.0** — **`v_at_delay_v`** is the **last** voltage sample of that RLX step (end of ~1 s rest).
+
+There is **one `step_no` per discharge segment** (multiple pairs per RAW file when the protocol repeats). Other protocols, or eligible labels without a matching rest phrase in the program, produce **no** `esr_computed` rows. **`esr.strict_mode`** / **`tolerance_s`** do not affect this path (delays still come from **`esr.delays_s`**).
 
 ## Looker Studio
 

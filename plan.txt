@@ -1,188 +1,106 @@
-Here’s the updated plan in human‑readable form (condensed but complete in terms of decisions and structure). The full text also lives in `c:\Users\alapt\.cursor\plans\geyser_cycler_analysis_tool_8562c610.plan.md`.
+Geyser Cycler Analysis Tool — condensed living plan (human-readable)
+========================================================================
+The canonical detailed plan with changelog is:
+  .cursor/plans/geyser_cycler_analysis_tool_8562c610.plan.md
 
----
+When answering “what is left in the plan”, DO NOT list items under
+“Permanently out of scope” below (they are closed, not backlog).
 
-### 1. Goal and high‑level behavior
 
-- **Goal**: A protocol‑aware Python tool that:
-  - Reads **CLK** and **RAW** logs from `D:\Electrical_tests\Cells\` and `D:\Electrical_tests\Blocks\`.
-  - **Parses program headers** (Preparation / Program / Completion) and step tags to detect which protocol is running.
-  - **Ingests trusted metrics** from CLK (capacity, energy, capacitance, efficiencies, ESR, leakage, etc.).
-  - **Optionally recomputes ESR** from RAW for specific protocols and delays (10 ms, 1 s).
-  - Generates **curve data** (CV/SNU, Cycling V–t + I, dQ/dV).
-  - Uploads to **BigQuery** on a **weekly or manual** basis via a Windows GUI.
-  - Powers **Looker Studio dashboards** from BigQuery.
+Permanently out of scope (authoritative — do not repeat as “remaining work”)
+-----------------------------------------------------------------------------
+  ~~Automated pytest~~
+  ~~Protocol “explorer” UI~~
+  ~~DCIR extractor~~
+  ~~dQ/dV (not in curves / analysis)~~
+  ~~Extra registry labels~~ (e.g. Reference GCD, FCR-D, legacy SOP-specific rows)
 
-- **Trigger**: User runs a small **PySimpleGUI app** on the lab PC and clicks “Update BigQuery” (or uses a CLI command).
+Optional / may still appear when asking “what’s left”: PyInstaller EXE for lab PCs;
+optional warehouse policy for time_series row volume; README / LOOKER_SETUP / plan hygiene.
 
----
 
-### 2. Paths, IDs, and folder flexibility
+1. Goal
+-------
+- Protocol-aware Python tool: read CLK + RAW from D:\Electrical_tests\Cells and Blocks\
+  (paths configurable), parse headers and step tags, detect protocol, ingest CLK metrics,
+  optional full RAW → BigQuery time_series, boundary-based ESR for selected protocols,
+  Looker-friendly curves (CYCLING + CV/SNU; no dQ/dV), upload to BigQuery, optional GCS
+  staging, per-table fingerprints, smart skip, Tkinter GUI + CLI, Looker dashboards.
 
-- **Primary ID & date source**: the `Object:` field and any `YYMMDD` pattern in names:
-  - Example: `Object: 260210_1_B01_011_C_001` → `index_id = "260210_1_B01_011"`, date = 2026‑02‑10.
-- **Fallbacks**:
-  - If `Object` is generic (`Test1`, `Test2`), look for `YYMMDD` in the filename.
-  - Else, fall back to `YYYY\MM\DD` from the directory tree.
-- The usual structure `YYYY\MM\DD\N_Gnn\NNN\...` is **used when present** but **not required**.
-  - Folders like `Blocks\2026\AGISTINE\...` or `Blocks\2026\02\10\006\Test 2\...` are handled by treating `N_Gnn`, `NNN`, `Test 2`, etc. as **metadata tags** (`batch_dir`, `group_dir`, `subtest_name`) rather than hard constraints.
+- Trigger: Tkinter “Update BigQuery” or CLI (--upload, --stage-only, --upload-batch, ...).
 
----
 
-### 3. Step tags and normalization
+2. Paths, IDs
+-------------
+- Primary: Object: header + YYMMDD patterns → index_id, date_ymd, group_id, test_date.
+- Folder layouts flexible; tool does not require strict YYYY\MM\DD\N_Gnn\NNN.
 
-All relevant step markers from the **ASC75 manual** and your data will be mapped into canonical `step_type` values. Examples:
 
-- **Constant‑mode steps**
-  - Charge: `CHCC`, `CCC` (constant current), `CHCV` (constant voltage), `CHCP` (constant power).
-  - Discharge: `DCHCC`, `DCCC`, `DCC`, `DCV`/`DCHCV`, `DCHCP`, `DCHCR`/`DCR`.
-- **Scans / sweeps**
-  - `SNU` (voltage scan), `SNI` (current scan), `SNP` (power scan), `SNR` (resistance scan).
-- **Relaxation & logging**
-  - `RLX` / `RLAX` (relaxation), `LGU` (voltage logger).
-- **Table‑driven**
-  - `TBU` / `Table U`, `TBI` / `Table I`, `TBP` / `Table P` / `TBLP`, `TBR` / `Table R`.
-- **Pulses**
-  - `IPI` (current pulse), `IPU` (voltage pulse), `IPP` (power pulse), `IPR` (resistance pulse).
-- **Other**
-  - `MPPT`, `Pause`, and summary `GNRL` rows.
+3. Step tags
+------------
+- Mapped in clk_reader STEP_TYPE_MAP → canonical step_type (CCC, DISCHARGE_CC, SCAN_V,
+  RELAX, …). RAW reader aligns Step column with same mapping.
 
-These are normalized (e.g., to `CCC`, `DCC`, `CV_CHARGE`, `SCAN_V`, `RELAX`, `TABLE_POWER`, `PULSE_CURRENT`, etc.) so protocol detection and metric logic can work over a stable internal set, while still supporting new programs.
 
----
+4. Protocol detection
+---------------------
+- Labels in BQ test_runs.protocol_detected: STANDARD_CELL, BLOCK_SCANNING, BLOCK_CYCLING,
+  CYCLABILITY, UNKNOWN. CYCLABILITY evaluated before YAML registry; registry.yaml defines
+  keyword rows; detector.py has fallbacks.
 
-### 4. Protocol detection
 
-- **Input**: parsed program header (Preparation, Program, Completion) + step markers from CLK/RAW.
-- **Representation**: `ProgramStep` objects with `step_num`, `mode` (`Charge CC`, `Scanning U`, `Rest`, `Table P`, etc.), parameters, and cycle refs (`Cycle to step X N times`).
-- **Matching**: a **YAML protocol registry** with patterns like:
+5. Metrics
+----------
+5.1 CLK — trusted per-step + GNRL (capacity, energy, ESR fields from cycler, efficiencies, …).
 
-  - `STANDARD_CELL` (SOP 3C):
-    - `CCC(low)` → `SNU(up)` → `SNU(down)` → cycle SNU 3× → `CCC(high)` → `DCC` → cycle (CCC+DCC) 20× → `CCC` → `CCV` → `LGU` → `DCC`.
-  - `VTT_TEST1_BLOCK` (ToS 7):
-    - `CHCC(5.1V)` → `CHCV(5.1V,30s)` → `CHCC(10.2V)` → `RLAX(1s)` → `DCCC(5.1V)` → `RLAX(1s)` → 19 cycles → final `DCCC(1V)`.
-  - `VTT_FCRD_NONZINC` (ToS 8):
-    - `CHCC` → `CHCV` → `TBLP` → `DCCC`.
-  - `CYCLABILITY` (SOP 7):
-    - `CCC(1.70V)` → `DCC(0.80V)` repeated N≥1000.
-  - `REFERENCE_GCD`, `DCIR_SOC`, etc.
+5.2 ESR from RAW (implemented 2026)
+- Boundary method in geyser_tool/analysis/esr.py.
+- Runs only if protocol_detected is STANDARD_CELL, BLOCK_CYCLING, or CYCLABILITY AND
+  program text matches a 1 s rest (Rest 1s, Rest during 1s, patterns in program_has_rest_1s).
+- Each DCC/DCCC/DCHCC segment immediately followed by RLX/RLAX: last discharge V and |I|;
+  delay_s ~0.01 → first RLX voltage; delay_s 1.0 → last RLX voltage; esr_ohm = (v_at - v_end) / |I|.
+- esr.strict_mode / tolerance_s do not affect this path; delays still from esr.delays_s.
 
-- If no known pattern matches above a threshold, the file is labeled `UNKNOWN`; all CLK metrics are still ingested, but no protocol‑specific ESR recomputation is applied.
+5.3 Curves — downsampled from in-memory time_series rows; per (cycle_no, step_no) by default;
+  CV segment caps; no dQ/dV.
 
----
 
-### 5. Metric strategy
+6. BigQuery tables
+------------------
+- test_runs, cycle_metrics, step_metrics, time_series (full RAW), esr_computed, curves,
+  run_fingerprints.
 
-#### 5.1 Direct ingestion from CLK (source of truth)
 
-For each **step** and `GNRL` (cycle summary) row, ingest:
+7. Architecture (key modules)
+-----------------------------
+- geyser_tool/config.py, pipeline.py, ids.py
+- parsers: header, clk_reader, raw_reader
+- protocol: detector.py, registry.yaml, program_model.py
+- analysis: esr.py, curves.py
+- upload: bigquery.py, staging.py, fingerprint.py
+- gui/app.py, cli/main.py
+- scripts/setup_bigquery.py, migrate_* as needed
 
-- `Q,Ah`, `E,Wh`, `C,F`, `ESR,mR`, `ERc,mR`, `ERd,mR`, `Ilk,A`, `EFq,%`, `EFe,%`, `Drt,s`,
-- Plus end‑of‑step voltage/current/temperature.
+(There is no sniffer.py in the current tree; tests/ and PyInstaller scripts are optional
+ ad hoc, not a committed test suite or shipping artifact.)
 
-We **trust these as primary metrics** across all protocols.
 
-#### 5.2 ESR recomputation from RAW (protocol‑specific)
+8. Phases — status (high level)
+--------------------------------
+- Phase 1 (parsers, protocol, IDs, BQ, auth, staging, Tkinter GUI, CLI, basic Looker): done.
+- Phase 2 (RAW, time axis, curves table, ESR boundary, docs): done for in-scope items.
+- Phase 3 (fingerprints, GCS load, stage/upload split): done.
+- Optional still: PyInstaller EXE; optional time_series cost tuning.
 
-For selected protocols (e.g., Standard Cell, VTT Test 1):
+Excluded permanently: see top of this file.
 
-- **Method** (per SOP 3D / ToS 7.5):
 
-  - Locate the **discharge → rest** edge: first sample where `|I| ≤ 0.02 * I_discharge`; define that as `t=0`.
-  - `VEND` = last sample with `|I| ≥ 0.98 * I_discharge`.
-  - Find nearest samples at 10 ms and 1.0 s after `t=0`:
-    - Strict: only if sample within `0.5 * dt`.
-  - Compute `ESR10ms = (V10ms - VEND) / |I_discharge|`, `ESR1s` similarly.
-  - Average over last 5 cycles if required.
+9. What’s left (for assistants / future sessions)
+-------------------------------------------------
+When summarizing remaining work, cite only:
+  - Optional PyInstaller packaging
+  - Optional BigQuery/time_series cost policy if spend becomes an issue
+  - Ongoing README / LOOKER_SETUP / plan sync when behaviour changes
 
-- **Sampling‑rate aware**:
-
-  - At **100 Hz** (cells) → ESR10ms and ESR1s both valid under strict rule.
-  - At **10 Hz** (blocks) → ESR10ms generally **disabled** (no sample that early); ESR1s valid.
-  - GUI automatically **greys out invalid delays** per file/sample rate and shows reasons.
-
-- Config allows a **relaxed mode** (extra tolerance window) with a flag indicating `is_approximate`.
-
----
-
-### 6. BigQuery data model
-
-Key tables:
-
-- `test_runs`: one row per file processed (run_id, index_id, object_id, entity_type, protocol_detected, program_text, analyzer_model, channel, sample_rate_hz, test_started, source_path, processed_at).
-- `cycle_metrics`: one row per cycle per file (metrics from `GNRL` lines).
-- `step_metrics`: one row per step per cycle (metrics + `step_tag`, normalized `step_type`).
-- `esr_computed`: recomputed ESR values from RAW (per delay, per cycle/step; includes flags and reasons).
-- `curves`: downsampled CV/SNU, Cycling, and dQ/dV curve points.
-
-`run_id` (hash of path+size+mtime) is used to **deduplicate** on upload.
-
----
-
-### 7. Architecture (modules)
-
-- `config.py`: YAML config (paths, BigQuery project/dataset, ESR settings, etc.).
-- `gui/app.py`: PySimpleGUI app:
-  - Select folders/files.
-  - Shows progress logs.
-  - “Update BigQuery” button.
-  - Summary of protocol coverage and data quality per run.
-- `cli/main.py`: CLI equivalent for scripting.
-- `parsers/header.py`: parse header (Analyzer, Object, Program, Preparation, Completion, sample rate).
-- `parsers/clk_reader.py`: parse CLK metrics into cycle/step tables.
-- `parsers/raw_reader.py`: stream RAW files per cycle.
-- `parsers/sniffer.py`: delimiter/decimal detection (though most files are fixed‑format).
-- `protocol/program_model.py`: `ProgramStep` and `ProgramDefinition` data structures.
-- `protocol/detector.py`: apply registry patterns to detect protocol label.
-- `protocol/registry.yaml`: extensible pattern definitions.
-- `analysis/esr.py`: ESR recomputation.
-- `analysis/curves.py`: generate CV/SNU, Cycling, dQ/dV curves.
-- `upload/bigquery.py`: dataset/table creation, upserts, dedup.
-- `upload/auth.py`: service‑account auth.
-- `upload/staging.py`: local Parquet/CSV staging for offline robustness.
-- `ids.py`: parse `Object` and paths into `index_id`, date, entity_type, metadata tags.
-- `utils/logging.py`, `utils/errors.py`.
-- `tests/`: unit tests for header parser, CLK reader, protocol detection, ESR, IDs.
-- `scripts/build_exe.bat`: PyInstaller one‑file build.
-- `scripts/setup_bigquery.py`: one‑time dataset/table creation.
-
----
-
-### 8. Phases
-
-#### Phase 1 – MVP
-
-- End‑to‑end for **cells and blocks**:
-  - Header parsing, CLK parsing, protocol detection (Standard Cell, VTT Test1/2, Cyclability, UNKNOWN).
-  - ID parsing and entity‑type inference.
-  - BigQuery tables: `test_runs`, `cycle_metrics`, `step_metrics`.
-  - GUI + CLI.
-  - Basic Looker dashboards: ESR, capacity, energy, efficiency by index/batch/time.
-
-#### Phase 2 – ESR, curves, protocol coverage
-
-- RAW reader + ESR recomputation (10 ms / 1 s).
-- `esr_computed` + `curves` tables.
-- Looker curve viewer and ESR comparison (cycler vs recomputed).
-- GUI:
-  - Cycle/step chooser for curves.
-  - ESR settings.
-- **Data‑quality & protocol‑coverage report** per run:
-  - Files per protocol.
-  - Sample‑rate distribution.
-  - ESR windows disabled with reasons.
-  - Unknown protocols.
-
-#### Phase 3 – DCIR, advanced analytics, EXE
-
-- **DCIR** at multiple SOCs (R0, R1s, etc.) from appropriate protocols.
-- Advanced Looker dashboards:
-  - Control charts, drift monitors, ToS‑style pass/fail KPIs.
-- **Protocol registry explorer**:
-  - Lists all distinct program headers.
-  - Shows current protocol mapping vs UNCLASSIFIED.
-  - Helps generate YAML patterns.
-- More protocol patterns (Reference GCD, DCIR programs, self‑discharge, block‑specific tests).
-- PyInstaller EXE packaging.
-
----
+Do NOT surface: pytest, protocol explorer, DCIR, dQ/dV, extra registry labels — those are
+out of scope by product decision.

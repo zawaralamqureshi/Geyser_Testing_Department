@@ -1,9 +1,9 @@
 ---
 name: Geyser Cycler Analysis Tool
-overview: A protocol-aware Python analysis tool that ingests CLK/RAW cycler logs from Geyser's ASK/ACK75 analyzers, automatically detects which test protocol is running from the program header, extracts and/or computes metrics (ESR, capacitance, capacity, energy, efficiencies), generates curve data, uploads everything to BigQuery on a weekly/manual schedule via a Windows GUI, and powers Looker Studio dashboards.
+overview: A protocol-aware Python analysis tool that ingests CLK/RAW cycler logs from Geyser's ASK/ACK75 analyzers, detects protocol from the program header, ingests CLK metrics, stores full RAW time_series, boundary-based ESR for selected protocols, Looker-friendly curves (no dQ/dV), uploads to BigQuery (optional GCS staging), fingerprints, Tkinter GUI + CLI, Looker dashboards. See § "Permanently out of scope" for items excluded from all future "what's left" summaries.
 todos:
   - id: phase1-parsers
-    content: "Phase 1: Build header parser (metadata, program steps, Object ID) + CLK tabular reader + sniffer"
+    content: "Phase 1: Build header parser (metadata, program steps, Object ID) + CLK tabular reader"
     status: completed
   - id: phase1-protocol
     content: "Phase 1: Protocol detection — YAML registry (STANDARD_CELL, BLOCK_SCANNING, BLOCK_CYCLING); CYCLABILITY gated in detector.py (>20 cycles, cell vs block discharge spelling); UNKNOWN fallback"
@@ -24,16 +24,16 @@ todos:
     content: "Phase 1: Basic Looker Studio dashboards (ESR trends, capacity/energy per batch, efficiency)"
     status: completed
   - id: phase1-tests
-    content: "Deferred: Unit tests — optional golden RAW fixtures later"
-    status: pending
+    content: ~~Automated pytest~~ — not in scope (permanent); do not list as backlog
+    status: cancelled
   - id: phase2-raw
-    content: "Phase 2: RAW file reader + ESR recomputation (10ms/1s, strict + tolerant modes)"
+    content: "Phase 2: RAW file reader + boundary-based ESR (delays 0.01/1.0 row semantics) + configurable raw_ts gap"
     status: completed
   - id: phase2-curves
-    content: "Phase 2: Curve generation (CV/SNU, Cycling V-t+I, dQ/dV) + curves BigQuery table + Looker viewer"
+    content: "Phase 2: Curve generation (CV/SNU, Cycling V–t+I); curves BQ table; per-step downsampling — dQ/dV not in scope"
     status: completed
   - id: phase3-ocv
-    content: "Deferred: DCIR, advanced KPI Looker dashboards, protocol explorer UI, PyInstaller EXE — out of scope; see §11 changelog (RAW ETL + curves)"
+    content: "Optional deferred: PyInstaller EXE for lab PCs — DCIR / explorer / extra dashboards not in scope"
     status: pending
   - id: phase3-incremental-upload
     content: "Phase 3: Per-table fingerprint - smart skip when fingerprints match; --force override"
@@ -48,8 +48,8 @@ todos:
     content: "Optional: tighten time_series row policy if warehouse cost dominates (full fidelity kept by default)"
     status: pending
   - id: docs-sync
-    content: "Maintain README / LOOKER_SETUP / plan changelog when altering RAW or curves behaviour"
-    status: pending
+    content: Maintain README / LOOKER_SETUP / plan changelog when altering RAW, curves, or ESR
+    status: completed
 isProject: false
 ---
 
@@ -62,16 +62,32 @@ This file is the **engineering record**: phased goals, backlog, architecture not
 **When you change behaviour, UX, schemas, or protocol rules**, refresh these in tandem:
 
 
-| Change type                                    | Update                                                                                                   |
-| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| User-visible flows                             | [Tool/README.md](../Tool/README.md) — functional overview, CLI/GUI flags                                 |
-| Looker dimensions / metric names               | [Tool/docs/LOOKER_SETUP.md](../Tool/docs/LOOKER_SETUP.md)                                                |
-| Protocol keywords (`STANDARD_CELL`, `BLOCK_*`) | [Tool/geyser_tool/protocol/registry.yaml](../Tool/geyser_tool/protocol/registry.yaml)                    |
-| CYCLABILITY thresholds, regexp, precedence     | [Tool/geyser_tool/protocol/detector.py](../Tool/geyser_tool/protocol/detector.py)                        |
-| Phased scope / backlog / “what landed when”    | **This plan** — add a dated entry under §11 Implementation Changelog; adjust frontmatter todos if needed |
+| Change type                                    | Update                                                                                                                                                                              |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| User-visible flows                             | [Tool/README.md](../Tool/README.md) — functional overview, CLI/GUI flags                                                                                                            |
+| Looker dimensions / metric names               | [Tool/docs/LOOKER_SETUP.md](../Tool/docs/LOOKER_SETUP.md)                                                                                                                           |
+| Protocol keywords (`STANDARD_CELL`, `BLOCK_`*) | [Tool/geyser_tool/protocol/registry.yaml](../Tool/geyser_tool/protocol/registry.yaml)                                                                                               |
+| CYCLABILITY thresholds, regexp, precedence     | [Tool/geyser_tool/protocol/detector.py](../Tool/geyser_tool/protocol/detector.py)                                                                                                   |
+| Phased scope / backlog / “what landed when”    | **This plan** — add a dated entry under §11 Implementation Changelog; adjust frontmatter todos if needed; **exclude § Permanently out of scope items** from “what’s left” summaries |
 
 
 **Superseded content:** Older sections still mention labels like `**VTT_TEST1_BLOCK`** or scored pattern matching—they are retained as narrative context unless removed. Prefer the **changelog** and `**Tool/`** docs for truth about the **running** codebase.
+
+### Permanently out of scope (authoritative)
+
+The following are **not** part of this product roadmap. They must **not** be repeated when answering “what is left in the plan” or similar backlog questions:
+
+
+| Item                           | Notes                                                                                                        |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| ~~**Automated pytest**~~       | No CI test suite commitment; optional ad-hoc scripts only.                                                   |
+| ~~**Protocol “explorer” UI**~~ | No dedicated explorer CLI/GUI.                                                                               |
+| ~~**DCIR extractor**~~         | No DCIR-from-RAW pipeline in this tool.                                                                      |
+| ~~**dQ/dV**~~                  | Not computed in `curves` / analysis; CYCLING + CV only.                                                      |
+| ~~**Extra registry labels**~~  | e.g. Reference GCD, FCR-D, legacy SOP-specific rows — not adding detection rows unless explicitly re-scoped. |
+
+
+**Still optionally deferred (may appear in “what’s left” when relevant):** PyInstaller EXE; optional `time_series` cost cap (`phase3-dynamic-max-points`); ongoing doc/config hygiene.
 
 ---
 
@@ -99,7 +115,7 @@ flowchart LR
 
 
 - **Input**: CLK summary files and RAW per-cycle files from `D:\Electrical_tests\Cells\` and `D:\Electrical_tests\Blocks\`. Folder structures are **usually** `YYYY\MM\DD\N_Gnn\NNN\`, but the tool primarily infers IDs/dates from the `Object:` header and `YYMMDD` patterns so it remains robust when `N_Gnn` or `NNN` are missing or renamed.
-- **Processing**: Parse metadata headers, detect protocol, extract per-cycle/step metrics from CLK, optionally recompute ESR from RAW, generate curve points.
+- **Processing**: Parse metadata headers, detect protocol, extract per-cycle/step metrics from CLK, recompute boundary-based ESR from RAW when protocol + program gates pass, generate curve points (no dQ/dV).
 - **Output**: BigQuery tables (canonical DB), Looker Studio dashboards (analytics), local Parquet staging cache.
 - **Trigger**: User clicks "Update BigQuery" in a small Windows GUI, or runs a CLI command.
 
@@ -153,21 +169,21 @@ All these markers will be mapped into canonical `step_type` enums (e.g., `CCC`, 
 
 ## 3. Protocol detection engine
 
-### 3.0 Implemented labels (canonical; 2026-05)
+### 3.0 Implemented labels (canonical; 2026-05-11)
 
 Values written to BigQuery as `**test_runs.protocol_detected`**:
 
 
-| Label            | Where defined                                                                | Summary                                                                                                                                                                                                                                                                                                 |
-| ---------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CYCLABILITY`    | [detector.py](../Tool/geyser_tool/protocol/detector.py) runs **before** YAML | **Cell path:** `Charge CC`, correct `Discharge CC`, regexp `Cycle to step <step> <n> times` with `**n > 20`**, and joined program text must **not** contain typo `Discarge CC`. **Block path:** `Charge CC`, typo `Discarge CC`, line `Preset number of cycles: N` with `**N > 20`**. Confidence `0.5`. |
-| `STANDARD_CELL`  | [registry.yaml](../Tool/geyser_tool/protocol/registry.yaml) (first row)      | `Scanning U` + `Charge CC` + `Discharge CC` + `Charge CV` + (`Rest` **or** `Logger U`).                                                                                                                                                                                                                 |
-| `BLOCK_SCANNING` | registry (second row)                                                        | `Scanning U` + `Preset number of cycles`.                                                                                                                                                                                                                                                               |
-| `BLOCK_CYCLING`  | registry (third row)                                                         | `Discarge CC` + `Rest` + `Preset number of cycles` (any `N`, including ≤ 20).                                                                                                                                                                                                                           |
-| `UNKNOWN`        | implicit                                                                     | Nothing matched YAML + detector fallbacks (if registry absent).                                                                                                                                                                                                                                         |
+| Label            | Where defined                                                                | Summary                                                                                                                                                                                                                                                                                         |
+| ---------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CYCLABILITY`    | [detector.py](../Tool/geyser_tool/protocol/detector.py) runs **before** YAML | **Cell path:** `Charge CC`, correct `Discharge CC`, regexp `Cycle to step <step> <n> times` with `**n > 20`**, and joined program text must not contain typo `Discarge CC`. Block path: `Charge CC`, typo `Discarge CC`, line `Preset number of cycles: N` with `**N > 20`**. Confidence `0.5`. |
+| `STANDARD_CELL`  | [registry.yaml](../Tool/geyser_tool/protocol/registry.yaml) (first row)      | `Scanning U` + `Charge CC` + `Discharge CC` + `Charge CV` + (`Rest` **or** `Logger U`).                                                                                                                                                                                                         |
+| `BLOCK_SCANNING` | registry (second row)                                                        | `Scanning U` + `Preset number of cycles`.                                                                                                                                                                                                                                                       |
+| `BLOCK_CYCLING`  | registry (third row)                                                         | `Discarge CC` + `Rest` + `Preset number of cycles` (any `N`, including ≤ 20).                                                                                                                                                                                                                   |
+| `UNKNOWN`        | implicit                                                                     | Nothing matched YAML + detector fallbacks (if registry absent).                                                                                                                                                                                                                                 |
 
 
-`ProgramStep.params` / `cycle_ref` in [program_model.py](../Tool/geyser_tool/protocol/program_model.py) support future structured parsing; today `**pipeline._program_from_header`** fills `**step_num**` and `**mode**` only — detection is substring / regexp matching on concatenated `**mode**` text ([detector.detect_protocol](../Tool/geyser_tool/protocol/detector.py)).
+`ProgramStep.params` / `cycle_ref` in [program_model.py](../Tool/geyser_tool/protocol/program_model.py) support future structured parsing; today `**pipeline._program_from_header`** fills `**step_num`** and `**mode**` only — detection is substring / regexp matching on concatenated `**mode**` text ([detector.detect_protocol](../Tool/geyser_tool/protocol/detector.py)).
 
 ### 3A. Target data model for program steps
 
@@ -188,7 +204,7 @@ class ProgramStep:
 | Protocol Label        | Step Sequence Pattern                                                                           | Source Doc                        |
 | --------------------- | ----------------------------------------------------------------------------------------------- | --------------------------------- |
 | `STANDARD_CELL`       | High-level CCC/SNU/DCC sequencing (conceptual SOP §3C)                                          | SOP Section 3                     |
-| ~~`VTT_TEST1_BLOCK`~~ | *(label retired in code)* replaced by `**BLOCK_SCANNING*`* / `**BLOCK_CYCLING**` heuristic rows | Was ToS §7 wording - Discontinued |
+| ~~`VTT_TEST1_BLOCK`~~ | *(label retired in code)* replaced by `**BLOCK_SCANNING`** / `**BLOCK_CYCLING*`* heuristic rows | Was ToS §7 wording - Discontinued |
 | `VTT_FCRD_NONZINC`    | `CCC -> CCV -> TableP -> DCC`                                                                   | ToS Section 8                     |
 | `CYCLABILITY`         | `CCC(to 1.70V) -> DCC(to 0.80V) -> Cycle(N>=1000)`                                              | SOP Section 5                     |
 | `REFERENCE_GCD`       | `CCC(0.85->1.70V) -> DCC(1.72->0.80V) -> Rest(2min) -> Cycle(3)`                                | SOP Section 5 - Discontinued      |
@@ -199,7 +215,7 @@ If **no** implemented rule matches (§3.0 + YAML + fallbacks), the protocol is `
 
 ### 3C. Why this is robust to protocol changes
 
-- **YAML** entries for `STANDARD_CELL` / `BLOCK_*` are editable without changing Python. `**CYCLABILITY`** requires code changes in `**detector.py**` when thresholds or shapes change.
+- **YAML** entries for `STANDARD_CELL` / `BLOCK_*` are editable without changing Python. `**CYCLABILITY`** requires code changes in `**detector.py`** when thresholds or shapes change.
 - Unknown protocols still get full metric ingestion from CLK.
 - The program header text is also stored verbatim in BigQuery for traceability.
 
@@ -228,31 +244,23 @@ Per-step rows and GNRL (per-cycle summary) rows in CLK already contain:
 
 These are the **primary source of truth** for all protocols.
 
-### 4B. ESR recomputation from RAW (protocol-specific, optional but important)
+### 4B. ESR recomputation from RAW (protocol-specific)
 
-For protocols where your SOP defines specific ESR windows (e.g. Standard Cell and block-style discharge tests), the tool will **also** compute ESR from RAW data:
+**Implemented (12 May 2026):** Boundary-based ESR in `[analysis/esr.py](../Tool/geyser_tool/analysis/esr.py)`. Eligible protocols: `STANDARD_CELL`, `BLOCK_CYCLING`, `CYCLABILITY`. CLK program must mention a 1 s rest (`Rest 1s`, `Rest during 1s`, or patterns in `program_has_rest_1s`). For each **DCC / DCCC / DCHCC** RAW segment immediately followed by **RLX / RLAX**; `v_end_v` and |I| from the **last** discharge row; `delay_s` ≈ **0.01** uses **first** RLX voltage; `delay_s` = **1.0** uses **last** RLX voltage. Multiple pairs per RAW file when the program repeats. See [README.md](../Tool/README.md) § `esr_computed`.
 
-**Standard Cell ESR (SOP Section 3D)**:
+~~The following bullet list described an older current-threshold + `t₀` + nearest-sample method; it is **not** what the code does today. Kept as archival context only.~~
 
-1. Find the discharge-to-rest transition: the first sample where `|I| <= 0.02 * I_discharge`. Define this as `t=0`.
-2. `VEND` = last voltage sample where `|I| >= 0.98 * I_discharge`.
-3. `V10ms` = voltage at `t = 10 ms` after current release (nearest sample; NaN if no sample within 0.5*dt).
-4. `V1s` = voltage at `t = 1.0 s` after current release (same rule).
-5. `ESR10ms = (V10ms - VEND) / |I_discharge|`
-6. `ESR1s = (V1s - VEND) / |I_discharge|`
+1. ~~Find the discharge-to-rest transition: the first sample where `|I| <= 0.02 * I_discharge`. Define this as `t=0`.~~
+2. ~~`VEND` = last voltage sample where `|I| >= 0.98 * I_discharge`.~~
+3. ~~`V10ms` / `V1s` from nearest samples at `t+10ms`, `t+1s` after rest start~~
 
-**Strict vs. practical tradeoff** (you asked to see both):
+**Legacy `esr.strict_mode` / `tolerance_s`** no longer affect boundary ESR; `delays_s` still selects which delay columns to emit.
 
-- **Strict doc-true**: ESR is NaN unless a sample exists exactly at 10ms/1s within 0.5*dt. At 10 Hz (dt=100ms), ESR10ms is **always NaN** (no sample at 10ms). At 100 Hz (dt=10ms), ESR10ms is valid.
-- **Practical relaxation**: Allow configurable tolerance (e.g., nearest sample within 20ms of target). Flag as `approximate` when tolerance > 0.5*dt.
-- **Recommendation**: Default to strict for cells (100 Hz, 10ms ESR is valid). For blocks (10 Hz), ESR10ms is reported as NaN with reason "sample rate insufficient"; ESR1s is valid. Users can enable relaxed mode in settings.
-
-**Block-style discharge ESR (historical ToS §7.5 wording)**:
-Same formula but applied to block-level discharge cycles. Report average of last 5 cycles.
+**Block-style discharge ESR:** When block programs match the same protocol + program-text gates, the same boundary logic applies per RAW segment (not “average of last 5 cycles” in code unless added later).
 
 ### 4C. Protocol-specific metric rules (dispatch table — *design sketch*)
 
-*Generated for planning; `**geyser_tool` does not currently centralize routing in a `PROTOCOL_METRICS` dictionary**. ESR/curve pipelines may still behave largely independent of `**protocol_detected`** — confirm in `**analysis/**` and `**upload/bigquery.py**` when wiring protocol-aware behaviour.*
+*Generated for planning; `**geyser_tool` does not currently centralize routing in a `PROTOCOL_METRICS` dictionary. ESR/curve pipelines may still behave largely independent of `**protocol_detected*`* — confirm in `**analysis/`** and `**upload/bigquery.py**` when wiring protocol-aware behaviour.*
 
 ```python
 PROTOCOL_METRICS = {
@@ -263,7 +271,7 @@ PROTOCOL_METRICS = {
         "capacitance_source": "clk",        # trust cycler computation
         "qref_eref_cycle": 3,               # 3rd discharge cycle
         "build_ocv_soc": True,
-        "curves": ["CV", "CYCLING", "DQDV"],
+        "curves": ["CV", "CYCLING"],
     },
     "BLOCK_CYCLING": {  # formerly sketched as VTT_TEST1_BLOCK
         "esr_recompute": True,
@@ -274,8 +282,8 @@ PROTOCOL_METRICS = {
         "curves": ["CYCLING"],
     },
     "CYCLABILITY": {
-        "esr_recompute": False,              # not needed for cycle life
-        "track_degradation": True,           # flag capacity fade
+        "esr_recompute": True,               # boundary ESR when DCC→RLX + program gates (2026)
+        "track_degradation": True,
         "curves": ["CYCLING"],
     },
     "UNKNOWN": {
@@ -454,8 +462,7 @@ geyser_tool/
     __init__.py
     header.py              # Parse metadata header: analyzer, object, program steps, limitations, sample rate
     clk_reader.py          # Parse CLK tabular data into cycle_metrics + step_metrics DataFrames
-    raw_reader.py          # Parse RAW files into time-series DataFrames (lazy, per-cycle); concatenate time across steps; output time_continuous_s, step_no, step_type
-    sniffer.py             # Delimiter/decimal detection (mostly space-separated, but handle edge cases)
+    raw_reader.py          # PARSE RAW; time_continuous_s, step_no, step_type
   protocol/
     __init__.py
     program_model.py       # ProgramStep, ProgramDefinition dataclasses
@@ -463,8 +470,8 @@ geyser_tool/
     registry.yaml          # Protocol pattern definitions (editable)
   analysis/
     __init__.py
-    esr.py                 # ESR recomputation from RAW (strict + configurable tolerance)
-    curves.py              # Generate CV, Cycling, dQ/dV curve points from RAW
+    esr.py                 # Boundary-based ESR (discharge → RLX) for gated protocols
+    curves.py              # CV, CYCLING downsampling from time_series (no dQ/dV)
   upload/
     __init__.py
     bigquery.py            # BigQuery client: create dataset/tables, upsert rows
@@ -474,14 +481,9 @@ geyser_tool/
   ids.py                   # Object ID parsing, index_id extraction, entity_type inference
   utils/
     __init__.py
-    logging.py             # Structured logging
-    errors.py              # Custom exceptions
-tests/
-  test_header_parser.py
-  test_clk_reader.py
-  test_protocol_detector.py
-  test_esr.py
-  test_ids.py
+    logging.py
+    errors.py
+  # tests/ — not a committed suite (pytest out of scope; see § Permanently out of scope)
 scripts/
   build_exe.bat            # PyInstaller one-file
   setup_bigquery.py        # One-time: create dataset + tables in BigQuery
@@ -509,40 +511,36 @@ requirements.txt
 - GUI: folder picker, progress bar, "Update BigQuery" button, log viewer
 - CLI mirror
 - Looker Studio: basic dashboards (ESR trends, capacity/energy per batch, efficiency tracking)
-- Unit tests for parser, protocol detection, ID parsing
+- ~~Unit tests for parser, protocol detection, ID parsing~~ — **not in scope** (see § Permanently out of scope)
 - README + CONFIG docs
 
-### Phase 2 -- ESR recomputation + curves + protocol coverage
+### Phase 2 -- ESR + curves (*mostly shipped; narrative below is archival*)
 
-**Goal**: Compute ESR10ms/ESR1s from RAW per SOP; generate and upload curve data; surface protocol coverage and data quality.
+**Goal (original spec):** ESR from RAW; curve data; protocol coverage UI.
 
-- RAW file reader (lazy per-cycle loading, handle large files)
-- **RAW time-series storage**: Store time, voltage, current, temperature, Ah, Wh for all RAW files, with step_no and step_type; time concatenated from program start to end.
-- ESR recomputation module (strict + configurable tolerance)
-- `esr_computed` BigQuery table + upload
-- Curve generation (CV/SNU from SNU steps, Cycling V-t+I, dQ/dV)
-- `curves` BigQuery table + upload
-- Looker Studio: interactive curve viewer, ESR comparison (cycler-reported vs recomputed)
-- GUI: cycle/step chooser for curve generation, ESR delay/tolerance settings
-- Data-quality & protocol-coverage report per run (files per protocol, sample-rate distribution, ESR windows disabled with reasons, unknown protocols) stored in BigQuery and summarized in the GUI
+**Implemented in repo:** RAW reader + full `time_series`; **boundary-based** ESR and `esr_computed`; `**curves`** (CYCLING + CV, per-step downsampling); **no dQ/dV**. Looker/README document ESR semantics. Optional GUI cycle picker / formal DQ report were never required for MVP — not in scope unless re-prioritized.
 
-### Phase 3 -- DCIR, advanced analytics, EXE packaging
+- ~~Curve generation … dQ/dV~~ — **not in scope** (see § Permanently out of scope).
 
-**Goal**: Extend analytics (DCIR, control charts, drift monitoring), add a protocol registry explorer, and ship a one-file EXE.
+### Phase 3 -- ~~DCIR~~, ~~explorer~~, EXE (*superseded plan text*)
 
-- DCIR extraction for pulse-type protocols (time-domain resistance R0/R1s at multiple SOCs) using your SOP definitions
-- Advanced Looker dashboards: control charts, variance views, drift monitors, pass/fail KPIs per ToS
-- Protocol registry explorer view (list distinct program headers, show matched protocol label vs UNCLASSIFIED, assist in adding new YAML patterns)
-- More protocol patterns in registry (Reference GCD, DCIR, FCR-D, self-discharge programs, block-specific programs, etc.)
-- PyInstaller EXE packaging + build script
+**Original stretch goals** included DCIR, registry explorer, extra YAML patterns, advanced Looker KPIs — all ~~**not in scope**~~ per § Permanently out of scope. **PyInstaller** remains optional deferred.
 
-### Remaining work (Phase 3)
+### Remaining work (authoritative short list)
 
-- DCIR extraction for pulse protocols
-- Advanced Looker dashboards (control charts, drift monitors, KPIs)
-- Protocol registry explorer
-- Additional protocol patterns in YAML
-- PyInstaller EXE packaging
+- **Optional:** PyInstaller EXE + `build_exe.bat` for lab convenience
+- **Optional:** tighten `time_series` ingest policy if warehouse cost dominates
+- **Ongoing:** README / LOOKER_SETUP / this plan when behaviour changes
+
+The following original “Phase 3 remaining” bullets are **closed** — do not surface as backlog:
+
+- ~~DCIR extraction for pulse protocols~~
+- ~~Advanced Looker dashboards (control charts, drift monitors, KPIs)~~ *(team may build ad hoc in Looker; not a tool milestone)*
+- ~~Protocol registry explorer~~
+- ~~Additional protocol patterns in YAML (Reference GCD, …)~~
+
+**Implemented from older Phase 3 technical tracks:**
+
 - **Per-table fingerprint**: Implemented. Fingerprint from file metadata; skip when all match; `--force` / `--force-run` override. `run_fingerprints` table stores per-table fingerprints.
 - **Parquet-GCS upload**: Implemented. When `gcs.gcs_bucket` set: stage to parquet, upload to GCS, BigQuery loads from GCS. Memory-efficient; fallback to in-memory when bucket not set.
 - **Split stage and upload**: Implemented. Stage to Parquet only (no GCS/Big); then Upload batch (select folder → GCS → BigQuery). Batches include `run_fingerprints.json` for fingerprint upsert on deferred upload.
@@ -579,8 +577,8 @@ service_account_key: "path/to/key.json"
 
 esr_recompute_enabled: true
 esr_delays_s: [0.010, 1.0]
-esr_strict_mode: true          # NaN if no sample within 0.5*dt
-esr_tolerance_s: 0.0           # 0 = strict; >0 = relaxed
+esr_strict_mode: true          # legacy; boundary ESR ignores strict/tolerance (see README)
+esr_tolerance_s: 0.0
 
 object_to_index_regex: "(\d{6}).*?(G\d+)_(\d{3})"
 entity_rules:
@@ -595,16 +593,22 @@ tags_override_heuristics: true
 
 ## 10. Scope reductions from original XML spec
 
+**Also authoritative:** the § **Permanently out of scope** table near the top — pytest, explorer UI, DCIR, dQ/dV, extra registry labels are **closed** (not deferred).
 
-| Original feature                      | Status in revised plan               | Reason                                                                                 |
-| ------------------------------------- | ------------------------------------ | -------------------------------------------------------------------------------------- |
-| DuckDB (week + master)                | **Removed**                          | Replaced by BigQuery as canonical DB per your Google Suite requirement                 |
-| Streamlit dashboard                   | **Removed**                          | Replaced by Looker Studio                                                              |
-| Local weekly Parquet partitions as DB | **Simplified** to staging cache only | BigQuery is the master; local Parquet is just a upload buffer                          |
-| Heuristic step detection (fallback)   | **Deferred to Phase 3**              | Header-based program parsing + step tags are sufficient for all your current protocols |
-| dQ/dV recomputation from I*dt         | **Deferred to Phase 2**              | Use logged Q where available first                                                     |
-| CONTRIBUTING.md, ARCHITECTURE.md      | **Simplified**                       | README + CONFIG docs are sufficient for MVP                                            |
-| PyInstaller EXE                       | **Deferred to Phase 3**              | Run as Python script initially                                                         |
+
+| Original feature                                    | Status in revised plan               | Reason                                                                 |
+| --------------------------------------------------- | ------------------------------------ | ---------------------------------------------------------------------- |
+| DuckDB (week + master)                              | **Removed**                          | Replaced by BigQuery as canonical DB per your Google Suite requirement |
+| Streamlit dashboard                                 | **Removed**                          | Replaced by Looker Studio                                              |
+| Local weekly Parquet partitions as DB               | **Simplified** to staging cache only | BigQuery is the master; local Parquet is just a upload buffer          |
+| Heuristic step detection (fallback)                 | **Deferred** (low priority)          | Header + step tags suffice for current protocols                       |
+| ~~dQ/dV recomputation from I*dt~~                   | **Not in scope**                     | See § Permanently out of scope                                         |
+| ~~Automated pytest~~                                | **Not in scope**                     | See § Permanently out of scope                                         |
+| ~~Protocol explorer UI~~                            | **Not in scope**                     | See § Permanently out of scope                                         |
+| ~~DCIR extractor~~                                  | **Not in scope**                     | See § Permanently out of scope                                         |
+| ~~Extra registry labels~~ (Reference GCD, FCR-D, …) | **Not in scope**                     | See § Permanently out of scope                                         |
+| CONTRIBUTING.md, ARCHITECTURE.md                    | **Simplified**                       | README + CONFIG docs are sufficient for MVP                            |
+| PyInstaller EXE                                     | **Optional / deferred**              | Run as Python script; lab convenience only                             |
 
 
 ---
@@ -613,15 +617,20 @@ tags_override_heuristics: true
 
 ### RAW ETL fidelity and Looker-aligned curves — 2026-05 (active focus)
 
-- **`raw_ts.inter_cycle_gap_s`:** Synthetic gap between concatenated RAW cycle files on **`time_series.time_s`**; **default `0`** ([`config.py`](Tool/geyser_tool/config.py), [`build_time_series_rows`](Tool/geyser_tool/upload/bigquery.py)). Set a positive value (e.g. `0.01`) only if you want an explicit delimiter.
-- **RAW documentation:** [`raw_reader`](Tool/geyser_tool/parsers/raw_reader.py) module docs describe **`Time,s`**, **`Step`** segmentation, **`time_continuous_s`**, and relationship to per-step durations.
-- **`curves`:** Default **per `(cycle_no, step_no)`** downsampling with edge preservation; CV caps tighten when CLK **`sample_rate_hz`** is low — see [`curves.py`](Tool/geyser_tool/analysis/curves.py) and [`LOOKER_SETUP.md`](Tool/docs/LOOKER_SETUP.md).
-- **Backlog triage:** Automated **pytest**, **PyInstaller EXE**, protocol **explorer** UI, **DCIR** extractor, and legacy SOP-specific protocol rows (**Reference GCD**, **FCR-D**, etc.) are **out of current scope** unless re-prioritized. Primary roadmap: **RAW ingestion accuracy + dashboard-friendly `curves` + Looker documentation.**
+- `**raw_ts.inter_cycle_gap_s`:** Synthetic gap between concatenated RAW cycle files on `**time_series.time_s`**; **default `0`** (`[config.py](Tool/geyser_tool/config.py)`, `[build_time_series_rows](Tool/geyser_tool/upload/bigquery.py)`). Set a positive value (e.g. `0.01`) only if you want an explicit delimiter.
+- **RAW documentation:** `[raw_reader](Tool/geyser_tool/parsers/raw_reader.py)` module docs describe `**Time,s`**, `**Step**` segmentation, `**time_continuous_s**`, and relationship to per-step durations.
+- `**curves`:** Default **per `(cycle_no, step_no)`** downsampling with edge preservation; CV caps tighten when CLK `**sample_rate_hz**` is low — see `[curves.py](Tool/geyser_tool/analysis/curves.py)` and `[LOOKER_SETUP.md](Tool/docs/LOOKER_SETUP.md)`.
+- **Operational focus:** RAW ingestion accuracy, dashboard-friendly `**curves`**, Looker documentation. Items permanently excluded from backlog: § **Permanently out of scope** (pytest, explorer, DCIR, dQ/dV, extra registry labels).
+
+### ESR boundary recomputation — 2026-05/06
+
+- `**esr_computed`:** Discharge markers **DCC / DCCC / DCHCC** followed by **RLX / RLAX**; `**v_end_v`** / **|I|** from last discharge row; `**delay_s`** 0.01 → first RLX V; `**delay_s**` 1.0 → last RLX V. Gated by `**STANDARD_CELL**`, `**BLOCK_CYCLING**`, `**CYCLABILITY**` and program phrases `**Rest 1s**`, `**Rest during 1s**` (see `[esr.py](Tool/geyser_tool/analysis/esr.py)`, `[bigquery.py](Tool/geyser_tool/upload/bigquery.py)`).
+- **Supersedes** prior current-threshold + strict sample-window ESR for these gates.
 
 ### Protocol labels & CYCLABILITY gating — 2026-05
 
-- `**VTT_TEST1_BLOCK`** (and similarly named placeholders) retired from dashboards and ingestion; `**test_runs.protocol_detected**` now uses `**BLOCK_SCANNING**`, `**BLOCK_CYCLING**`, `**CYCLABILITY**`, `**STANDARD_CELL**`, `**UNKNOWN**`.
-- `**CYCLABILITY**` is evaluated **before** `**registry.yaml`**: numeric gates `**> 20**` cycles; **cells** vs **blocks** separated by `**Discharge CC`** (correct spelling) vs CLK typo `**Discarge CC**`. See `**Tool/geyser_tool/protocol/detector.py**` and `**Tool/README.md**` § Protocol detection.
+- `**VTT_TEST1_BLOCK`** (and similarly named placeholders) retired from dashboards and ingestion; `**test_runs.protocol_detected`** now uses `**BLOCK_SCANNING**`, `**BLOCK_CYCLING**`, `**CYCLABILITY**`, `**STANDARD_CELL**`, `**UNKNOWN**`.
+- `**CYCLABILITY**` is evaluated **before** `**registry.yaml`**: numeric gates `**> 20`** cycles; cells vs blocks separated by `**Discharge CC**` (correct spelling) vs CLK typo `**Discarge CC**`. See `**Tool/geyser_tool/protocol/detector.py**` and `**Tool/README.md**` § Protocol detection.
 - `**Tool/docs/LOOKER_SETUP.md**` filter docs updated (`protocol_detected` list).
 - **BigQuery `channel` staging**: typed as nullable **INT64** in Parquet where applicable to satisfy load jobs (see staging column rules in `**upload/staging.py`**—ongoing schema hygiene).
 

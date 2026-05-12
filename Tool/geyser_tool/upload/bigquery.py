@@ -399,31 +399,34 @@ def build_esr_computed_rows(
     index_id: str,
     raw_dfs: List[Tuple[int, pd.DataFrame]],
     config: Optional[AppConfig] = None,
+    protocol_label: str = "",
+    program_text: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Build esr_computed rows from RAW DataFrames (per cycle, discharge-to-rest). Skips SNU/SCAN cycles."""
+    """Build esr_computed rows from RAW DataFrames.
+
+    Uses boundary-based ESR when ``protocol_detected`` is ``STANDARD_CELL``, ``BLOCK_CYCLING``,
+    or ``CYCLABILITY`` and the CLK program matches ``program_has_rest_1s`` (e.g. ``Rest 1s``,
+    ``Rest during 1s``). One pair of delays per qualifying discharge → RLX segment per RAW file.
+    """
     cfg = config or AppConfig.load()
     rows: List[Dict[str, Any]] = []
     for cycle_no, df in raw_dfs:
         if df.empty:
             continue
-        # Skip SNU/SCAN cycles - no real discharge-to-rest
-        if "step_type" in df.columns:
-            scan_mask = df["step_type"].astype(str).str.upper().str.contains("SCAN|SNU", na=False)
-            if scan_mask.all():
-                continue
         results = compute_esr_from_discharge_rest(
             df,
             delays_s=cfg.esr.delays_s,
             strict_mode=cfg.esr.strict_mode,
             tolerance_s=cfg.esr.tolerance_s,
+            protocol_label=protocol_label,
+            program_text=program_text,
         )
-        step_no = int(df["step_no"].iloc[0]) if "step_no" in df.columns else -1
         for r in results:
             rows.append({
                 "run_id": run_id,
                 "index_id": index_id,
                 "cycle_no": int(cycle_no),
-                "step_no": step_no,
+                "step_no": r.step_no,
                 "direction": "discharge",
                 "delay_s": r.delay_s,
                 "esr_ohm": None if (r.esr_ohm != r.esr_ohm) else r.esr_ohm,  # NaN -> None
@@ -488,8 +491,14 @@ def process_and_build_rows(
                 raw_dfs_list,
                 inter_cycle_gap_s=cfg.raw_ts.inter_cycle_gap_s,
             )
+            prog_txt = "\n".join(header.program_lines) if header.program_lines else None
             esr_rows = build_esr_computed_rows(
-                run_id, summary.index_id, raw_dfs_list, config=cfg
+                run_id,
+                summary.index_id,
+                raw_dfs_list,
+                config=cfg,
+                protocol_label=summary.protocol.label,
+                program_text=prog_txt,
             )
             sample_hz_plot: Optional[float] = None
             if header.data_period_s and header.data_period_s > 0:

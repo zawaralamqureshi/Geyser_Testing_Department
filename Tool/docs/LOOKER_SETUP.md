@@ -17,7 +17,7 @@ Connect Looker Studio to your BigQuery dataset to build dashboards for electrica
 | `step_metrics` | Per-step metrics: step_no, step_type, duration, voltage, current |
 | `time_series` | Time-series (**all** RAW samples stored; no downsampling): `time_s`, `step_no`, `step_type`, voltage, current, temperature, Ah, Wh |
 | `curves` | **Downsampled** points for dashboards: see below (CYCLING vs CV semantics) |
-| `esr_computed` | Recomputed ESR at 10ms and 1s from **full** RAW (not from `curves`) |
+| `esr_computed` | **STANDARD_CELL**, **BLOCK_CYCLING**, or **CYCLABILITY** only (with program text **`Rest 1s`**, **`Rest during 1s`**, etc.). ESR from **full** RAW using step boundaries: discharge **DCC / DCCC / DCHCC** then **RLX / RLAX**. **`delay_s` 0.01** → **first** RLX vs **last** discharge; **`delay_s` 1.0** → **last** RLX vs **last** discharge. Not from `curves`. |
 
 ### Curves table semantics (for charts)
 
